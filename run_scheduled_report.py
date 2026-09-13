@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
-"""run_scheduled_report.py — entry point for the twice-monthly Windows Task
-Scheduler job (1st and 15th). Guards on compute_period's reporting-day check,
-then runs generate_report.py's real pipeline against PRODUCTION Bubble for
-every office in offices.json, using the computed period window."""
+"""run_scheduled_report.py — entry point for the twice-monthly scheduled run
+(a Windows Task Scheduler job locally, or a Claude Code routine in the
+cloud). Guards on compute_period's reporting-day check, then runs
+generate_report.py's real pipeline for every office in offices.json, using
+the computed period window. Which Bubble environment that hits is whatever
+BUBBLE_BASE_URL resolves to (see generate_report.py's resolve_base_url) —
+this script doesn't hard-code production.
+
+Every generated PDF is then handed to drive_upload.upload_reports(), since a
+cloud routine's filesystem does not persist between runs — a PDF that only
+lands in ./reports would otherwise be silently lost. That upload is a no-op
+(not an error) if GOOGLE_SERVICE_ACCOUNT_JSON isn't configured, so local
+testing of this same entry point (as used throughout development) still
+works with no Drive access at all."""
 import json
 import os
 import sys
@@ -13,6 +23,7 @@ sys.path.insert(0, SCRIPT_DIR)
 
 from compute_period import compute_period
 from generate_report import generate_all_reports
+from drive_upload import upload_reports
 
 
 def period_dict(window: dict) -> dict:
@@ -46,7 +57,18 @@ def main() -> int:
 
     period = period_dict(window)
     summary = generate_all_reports(offices, period, config, mock=False, use_test=False)
-    return 0 if summary["errors"] == 0 else 1
+
+    pdf_paths = [s["path"] for s in summary.get("successes", [])]
+    upload_results = upload_reports(pdf_paths, config.get("drive_reports_folder_id"))
+    upload_failures = [r for r in upload_results if r["status"] == "failed"]
+
+    # A PDF that generated but failed to upload is not actually delivered —
+    # on a cloud routine it will vanish when the session ends — so it counts
+    # toward the same failure signal a generation error would.
+    total_errors = summary["errors"] + len(upload_failures)
+    if upload_failures:
+        print(f"{len(upload_failures)} report(s) generated but failed to upload to Drive")
+    return 0 if total_errors == 0 else 1
 
 
 if __name__ == "__main__":

@@ -66,15 +66,6 @@ cannot reach live data; only an environment explicitly configured for
 production can. Must be `https://` — the token is sent as a Bearer header and
 plaintext HTTP is refused.
 
-### Connectors
-
-Enable the **Google Drive** connector on the routine, so it can upload the
-finished PDFs — cloud sessions are ephemeral and the filesystem does not
-persist.
-
-Connector traffic is proxied through Anthropic's servers rather than the
-session's network, so it works regardless of the domain allowlist.
-
 ### What the routine should do
 
 ```bash
@@ -83,7 +74,8 @@ playwright install chromium
 python run_scheduled_report.py
 ```
 
-(with `BUBBLE_API_TOKEN` already present in the environment)
+(with `BUBBLE_API_TOKEN`, `BUBBLE_BASE_URL`, and `GOOGLE_SERVICE_ACCOUNT_JSON`
+already present in the environment)
 
 `run_scheduled_report.py` is the scheduled entry point. It:
 
@@ -91,14 +83,43 @@ python run_scheduled_report.py
    cleanly if not — so an off-cycle run can't produce a wrong-period report
 2. Computes the correct reporting window and its comparison period
 3. Generates one PDF per office in `offices.json`, into `reports/`
-
-The routine should then upload everything in `reports/` to the Drive folder
-in `config.json` (`drive_reports_folder_id`), because the session's own
-filesystem does not persist.
+4. **Uploads each PDF to Drive itself** (`drive_upload.py`), since the
+   session's own filesystem does not persist between runs
 
 A run that isn't on a reporting day logs
 `Not a reporting day (today is the N); skipping.` and exits 0. That's the
 date guard working, not a failure.
+
+The routine's own prompt does not need to handle the Drive upload — it's code,
+not agent behavior, so it happens the same way on every run rather than
+depending on the routine correctly remembering to do it each time.
+
+## Uploading PDFs to Drive
+
+Upload is a **Google Cloud service account**, not the Drive connector Claude
+sessions normally use — a plain Python subprocess has no access to that
+connector; it needs its own credential.
+
+**One-time setup:**
+
+1. In Google Cloud Console, create a project (or reuse one) and enable the
+   **Google Drive API**.
+2. Create a **service account**, then generate a **JSON key** for it.
+3. Open the target Drive folder (`drive_reports_folder_id` in `config.json`)
+   and **share** it with the service account's email address — it looks like
+   `xxx@your-project.iam.gserviceaccount.com` — with **Editor** access.
+4. Set `GOOGLE_SERVICE_ACCOUNT_JSON` to that key file's **raw JSON content**
+   (not a file path) as an environment variable / secret on the routine.
+
+Leaving this unset is fine — `generate_report.py` behaves exactly as before
+(PDFs only in `reports/`), and `run_scheduled_report.py` logs a clear skip
+message rather than failing. Nothing here is needed for `--mock` or
+`--use-test-version` runs.
+
+For a manual CLI run, upload is opt-in via `--upload-to-drive` (off by
+default, so a `--use-test-version` reconciliation pass doesn't push synthetic
+test PDFs into the client's real Drive folder). `run_scheduled_report.py`
+always uploads and does not use this flag.
 
 ---
 
@@ -148,7 +169,8 @@ client-facing report changed accordingly.
 | File | Purpose |
 |---|---|
 | `generate_report.py` | Main pipeline + CLI: fetch → compute → template → PDF |
-| `run_scheduled_report.py` | Scheduled entry point (date guard + period window) |
+| `run_scheduled_report.py` | Scheduled entry point (date guard + period window + Drive upload) |
+| `drive_upload.py` | Uploads generated PDFs to Drive via a service account |
 | `compute_period.py` | 1st/15th guard and reporting-window arithmetic |
 | `commentary.py` | Generates the narrative bullets |
 | `template.html` | Jinja2 template, rendered to PDF via Playwright |

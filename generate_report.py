@@ -733,8 +733,14 @@ def main():
     parser.add_argument("--mock", action="store_true", help="use synthetic data, no Bubble access required")
     parser.add_argument("--use-test-version", action="store_true",
                          help="use config.json's bubble_base_url_test (the named Bubble test/staging "
-                              "version) instead of bubble_base_url (production). For manual ad hoc runs "
-                              "only — the scheduled task should never pass this.")
+                              "version) instead of BUBBLE_BASE_URL/bubble_base_url. For manual ad hoc "
+                              "runs only — the scheduled task should never pass this.")
+    parser.add_argument("--upload-to-drive", action="store_true",
+                         help="upload generated PDFs to Drive (config.json's drive_reports_folder_id) "
+                              "via GOOGLE_SERVICE_ACCOUNT_JSON. Off by default for manual CLI runs, so a "
+                              "--use-test-version reconciliation pass doesn't push synthetic test PDFs "
+                              "into the client's real Drive folder. run_scheduled_report.py (the routine "
+                              "entry point) always uploads and doesn't use this flag.")
     args = parser.parse_args()
 
     if args.env_file:
@@ -751,7 +757,16 @@ def main():
 
     summary = generate_all_reports(offices, period, config, mock=args.mock,
                                     only_office=args.only_office, use_test=args.use_test_version)
-    sys.exit(0 if summary["errors"] == 0 else 1)
+
+    total_errors = summary["errors"]
+    if args.upload_to_drive:
+        from drive_upload import upload_reports
+        pdf_paths = [s["path"] for s in summary.get("successes", [])]
+        upload_failures = [r for r in upload_reports(pdf_paths, config.get("drive_reports_folder_id"))
+                            if r["status"] == "failed"]
+        total_errors += len(upload_failures)
+
+    sys.exit(0 if total_errors == 0 else 1)
 
 
 if __name__ == "__main__":
