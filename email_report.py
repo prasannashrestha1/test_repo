@@ -18,9 +18,35 @@ never need email access at all.
 """
 import os
 import smtplib
+import socket
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+
+def _connect_smtp_ipv4(host: str, port: int, timeout: int) -> smtplib.SMTP:
+    """Connect to an SMTP host forcing IPv4, then hand back a normal SMTP
+    object as if smtplib.SMTP(host, port) had connected directly.
+
+    Some sandboxed environments have no IPv6 support in their network
+    namespace at all. smtp.gmail.com resolves to both IPv4 and IPv6
+    addresses, and Python's default connection logic can try IPv6 first --
+    in such a sandbox that fails immediately with
+    "OSError: [Errno 97] Address family not supported by protocol" (EAFNOSUPPORT),
+    never falling back to the IPv4 address that would have worked fine.
+    Resolving to a concrete IPv4 address ourselves and connecting to that
+    sidesteps the family-selection question entirely.
+
+    The original hostname is restored onto the connected object afterward,
+    because starttls() needs it for TLS server-name verification against
+    Gmail's certificate -- verifying against the raw IP would fail that
+    check even though the underlying socket is IPv4.
+    """
+    ipv4_addr = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+    server = smtplib.SMTP(timeout=timeout)
+    server.connect(ipv4_addr, port)
+    server._host = host  # noqa: SLF001 — restores the hostname for starttls()'s certificate check
+    return server
 
 
 def send_report_email(pdf_paths: list, to_addrs: list, subject: str = None, body: str = None) -> dict:
@@ -68,10 +94,13 @@ def send_report_email(pdf_paths: list, to_addrs: list, subject: str = None, body
             part.add_header("Content-Disposition", "attachment", filename=os.path.basename(path))
             msg.attach(part)
 
-        with smtplib.SMTP(host, port, timeout=30) as server:
+        server = _connect_smtp_ipv4(host, port, timeout=30)
+        try:
             server.starttls()
             server.login(username, password)
             server.sendmail(username, to_addrs, msg.as_string())
+        finally:
+            server.quit()
         print(f"emailed {len(pdf_paths)} report(s) to {', '.join(to_addrs)}")
         return {"status": "sent", "to": to_addrs, "count": len(pdf_paths)}
     except Exception as e:  # noqa: BLE001 — a failed send must not crash the caller
