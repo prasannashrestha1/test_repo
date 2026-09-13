@@ -7,12 +7,12 @@ the computed period window. Which Bubble environment that hits is whatever
 BUBBLE_BASE_URL resolves to (see generate_report.py's resolve_base_url) —
 this script doesn't hard-code production.
 
-Every generated PDF is then handed to drive_upload.upload_reports(), since a
-cloud routine's filesystem does not persist between runs — a PDF that only
-lands in ./reports would otherwise be silently lost. That upload is a no-op
-(not an error) if GOOGLE_SERVICE_ACCOUNT_JSON isn't configured, so local
-testing of this same entry point (as used throughout development) still
-works with no Drive access at all."""
+Every generated PDF is then handed to drive_upload.upload_reports() and
+email_report.send_report_email(), since a cloud routine's filesystem does not
+persist between runs — a PDF that only lands in ./reports would otherwise be
+silently lost. Both are no-ops (not errors) when their credentials aren't
+configured, so local testing of this same entry point (as used throughout
+development) still works with no Drive or email access at all."""
 import json
 import os
 import sys
@@ -24,6 +24,7 @@ sys.path.insert(0, SCRIPT_DIR)
 from compute_period import compute_period
 from generate_report import generate_all_reports
 from drive_upload import upload_reports
+from email_report import send_report_email
 
 
 def period_dict(window: dict) -> dict:
@@ -59,16 +60,34 @@ def main() -> int:
     summary = generate_all_reports(offices, period, config, mock=False, use_test=False)
 
     pdf_paths = [s["path"] for s in summary.get("successes", [])]
+
     upload_results = upload_reports(pdf_paths, config.get("drive_reports_folder_id"))
     upload_failures = [r for r in upload_results if r["status"] == "failed"]
 
-    # A PDF that generated but failed to upload is not actually delivered —
-    # on a cloud routine it will vanish when the session ends — so it counts
-    # toward the same failure signal a generation error would.
-    total_errors = summary["errors"] + len(upload_failures)
+    to_addrs = recipients_from_config(config)
+    email_result = send_report_email(pdf_paths, to_addrs)
+    email_failed = email_result["status"] == "failed"
+
+    # A PDF that generated but wasn't actually delivered anywhere is not
+    # meaningfully "done" — on a cloud routine it will vanish along with the
+    # session's filesystem — so delivery failures count the same as a
+    # generation error would.
+    total_errors = summary["errors"] + len(upload_failures) + (1 if email_failed else 0)
     if upload_failures:
         print(f"{len(upload_failures)} report(s) generated but failed to upload to Drive")
+    if email_failed:
+        print("report email failed to send")
     return 0 if total_errors == 0 else 1
+
+
+def recipients_from_config(config: dict) -> list:
+    """REPORT_EMAIL_TO (comma-separated) overrides config.json's
+    report_email_recipients — a quick way to redirect a test run to a
+    different inbox without editing the file."""
+    env_override = (os.environ.get("REPORT_EMAIL_TO") or "").strip()
+    if env_override:
+        return [addr.strip() for addr in env_override.split(",") if addr.strip()]
+    return config.get("report_email_recipients", [])
 
 
 if __name__ == "__main__":

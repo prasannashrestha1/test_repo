@@ -760,6 +760,13 @@ def main():
                               "--use-test-version reconciliation pass doesn't push synthetic test PDFs "
                               "into the client's real Drive folder. run_scheduled_report.py (the routine "
                               "entry point) always uploads and doesn't use this flag.")
+    parser.add_argument("--email-report", action="store_true",
+                         help="email generated PDFs via SMTP (SMTP_USERNAME/SMTP_PASSWORD) to "
+                              "config.json's report_email_recipients, or --email-to if given. Off by "
+                              "default for manual CLI runs, for the same reason as --upload-to-drive.")
+    parser.add_argument("--email-to", default=None,
+                         help="comma-separated recipient override for --email-report, instead of "
+                              "config.json's report_email_recipients.")
     args = parser.parse_args()
 
     if args.env_file:
@@ -778,12 +785,20 @@ def main():
                                     only_office=args.only_office, use_test=args.use_test_version)
 
     total_errors = summary["errors"]
+    pdf_paths = [s["path"] for s in summary.get("successes", [])]
+
     if args.upload_to_drive:
         from drive_upload import upload_reports
-        pdf_paths = [s["path"] for s in summary.get("successes", [])]
         upload_failures = [r for r in upload_reports(pdf_paths, config.get("drive_reports_folder_id"))
                             if r["status"] == "failed"]
         total_errors += len(upload_failures)
+
+    if args.email_report:
+        from email_report import send_report_email
+        to_addrs = ([a.strip() for a in args.email_to.split(",") if a.strip()] if args.email_to
+                    else config.get("report_email_recipients", []))
+        if send_report_email(pdf_paths, to_addrs)["status"] == "failed":
+            total_errors += 1
 
     sys.exit(0 if total_errors == 0 else 1)
 

@@ -94,14 +94,15 @@ and `BUBBLE_BASE_URL` are both also set)
    cleanly if not — so an off-cycle run can't produce a wrong-period report
 2. Computes the correct reporting window and its comparison period
 3. Generates one PDF per office in `offices.json`, into `reports/`
-4. **Uploads each PDF to Drive itself** (`drive_upload.py`), since the
-   session's own filesystem does not persist between runs
+4. **Uploads each PDF to Drive** (`drive_upload.py`) **and emails it**
+   (`email_report.py`), since the session's own filesystem does not persist
+   between runs
 
 A run that isn't on a reporting day logs
 `Not a reporting day (today is the N); skipping.` and exits 0. That's the
 date guard working, not a failure.
 
-The routine's own prompt does not need to handle the Drive upload — it's code,
+The routine's own prompt does not need to handle delivery itself — it's code,
 not agent behavior, so it happens the same way on every run rather than
 depending on the routine correctly remembering to do it each time.
 
@@ -131,6 +132,35 @@ For a manual CLI run, upload is opt-in via `--upload-to-drive` (off by
 default, so a `--use-test-version` reconciliation pass doesn't push synthetic
 test PDFs into the client's real Drive folder). `run_scheduled_report.py`
 always uploads and does not use this flag.
+
+## Emailing PDFs
+
+No third-party package and no paid service — `email_report.py` uses only
+Python's own standard-library `email`/`smtplib` modules. It reads each PDF
+and hands the bytes to those libraries, which handle MIME/base64 encoding
+internally as part of building the email; that's normal, invisible plumbing
+every email client does, not something that has to pass through an LLM's
+context to happen (the way, say, a chat-based Drive upload would).
+
+**One-time setup — a Gmail App Password, not your real password:**
+
+1. Turn on **2-Step Verification** on the sending Google account, if not
+   already on (required before App Passwords are available).
+2. Google Account → Security → **App Passwords** → create one.
+3. Set `SMTP_USERNAME` to that Gmail address and `SMTP_PASSWORD` to the
+   generated App Password.
+4. Set recipients: `report_email_recipients` (a list) in `config.json`, or
+   `REPORT_EMAIL_TO` (comma-separated) as a quick override without editing
+   that file.
+
+Leaving `SMTP_USERNAME`/`SMTP_PASSWORD` unset is fine — `run_scheduled_report.py`
+logs a clear skip message rather than failing. Nothing here is needed for
+`--mock` or `--use-test-version` runs.
+
+For a manual CLI run, email is opt-in via `--email-report` (with an optional
+`--email-to` override), off by default for the same reason `--upload-to-drive`
+is. `run_scheduled_report.py` always attempts to send and does not use either
+flag.
 
 ---
 
@@ -182,6 +212,7 @@ client-facing report changed accordingly.
 | `generate_report.py` | Main pipeline + CLI: fetch → compute → template → PDF |
 | `run_scheduled_report.py` | Scheduled entry point (date guard + period window + Drive upload) |
 | `drive_upload.py` | Uploads generated PDFs to Drive via a service account |
+| `email_report.py` | Emails generated PDFs via SMTP (standard library only) |
 | `compute_period.py` | 1st/15th guard and reporting-window arithmetic |
 | `commentary.py` | Generates the narrative bullets |
 | `template.html` | Jinja2 template, rendered to PDF via Playwright |
