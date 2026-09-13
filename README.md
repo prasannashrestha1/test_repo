@@ -9,6 +9,54 @@ and testing.
 
 ---
 
+## Getting this onto GitHub and running as a routine
+
+**1. Push to GitHub.** This repo has no remote configured yet. Create an
+empty **private** repo on GitHub first (no README/license, so it doesn't
+conflict with what's already here), then:
+
+```bash
+git remote add origin https://github.com/YOUR_ORG/YOUR_REPO.git
+git push -u origin main
+```
+
+**2. Allowlist two domains** on the Claude Code cloud environment the routine
+will use (Admin settings → Cloud environments → the environment → Network
+access → Custom → Allowed domains):
+
+| Domain | Why |
+|---|---|
+| `app.quietlist.com.au` | The Bubble Data API itself |
+| `cdn.playwright.dev` | Chromium download for `playwright install` |
+
+PyPI is allowlisted by default, so `pip install` needs no configuration — but
+Playwright's *browser binary* comes from a separate host, and missing it
+means setup fails before ever reaching Bubble.
+
+**3. Set environment variables / secrets on the routine.** At minimum:
+
+| Variable | Required? |
+|---|---|
+| `BUBBLE_API_TOKEN` | Yes |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Only if delivering via Drive |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | Only if delivering via email (verified working — see Status) |
+| `BUBBLE_ALLOW_PRODUCTION` + `BUBBLE_BASE_URL` | Only once ready for real (non-test) data — see [PRODUCTION_ACCESS_DISABLED.md](PRODUCTION_ACCESS_DISABLED.md) |
+
+**4. Create the routine**, pointed at this repo, scheduled for the 1st and
+15th, running:
+
+```bash
+pip install -r requirements.txt
+playwright install chromium
+python run_scheduled_report.py
+```
+
+That's the entire routine prompt — `run_scheduled_report.py` already handles
+the date guard, report generation, and delivery (Drive + email) itself. See
+"Running as a Claude Code routine" below for the full detail on each piece.
+
+---
+
 ## Quick start (local)
 
 ```bash
@@ -210,7 +258,7 @@ client-facing report changed accordingly.
 | File | Purpose |
 |---|---|
 | `generate_report.py` | Main pipeline + CLI: fetch → compute → template → PDF |
-| `run_scheduled_report.py` | Scheduled entry point (date guard + period window + Drive upload) |
+| `run_scheduled_report.py` | Scheduled entry point (date guard + period window + delivery) |
 | `drive_upload.py` | Uploads generated PDFs to Drive via a service account |
 | `email_report.py` | Emails generated PDFs via SMTP (standard library only) |
 | `compute_period.py` | 1st/15th guard and reporting-window arithmetic |
@@ -225,6 +273,11 @@ client-facing report changed accordingly.
 
 - ✅ Validated end-to-end against TEST/staging: counts reconcile exactly
   against the test data (3 listings, 10 matches; Apartments 1/3, Houses 2/7)
+- ✅ **Email delivery verified with a real send** — `email_report.py`
+  successfully delivered a generated PDF via Gmail SMTP
+- ⚠️ **Drive delivery is code-complete but not yet verified with a real
+  upload** — every skip/failure path is tested, but no Google Cloud service
+  account has been created yet to prove an actual upload
 - ⚠️ **Production has never been exercised**
 - ⚠️ `CURRENT` is the only `malcolm_listing_state` value observed — filtering
   against other states is unproven
