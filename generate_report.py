@@ -87,7 +87,14 @@ from playwright.async_api import async_playwright
 from commentary import build_commentary
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(SCRIPT_DIR, ".env"))
+
+# BUBBLE_API_TOKEN is read from the environment. A real environment variable
+# always wins over .env, which is what lets a cloud routine or CI job inject it
+# as a secret with no file on disk, while local development keeps using .env.
+# Loaded at import time so library callers (run_scheduled_report.py) get it too;
+# --env-file can point at a different file, and overrides this.
+DEFAULT_ENV_FILE = os.path.join(SCRIPT_DIR, ".env")
+load_dotenv(DEFAULT_ENV_FILE)
 
 # Coarse category mapping for the Performance Overview table. Keys are
 # lower-cased raw property_types values as they might appear in Bubble;
@@ -582,9 +589,16 @@ def generate_all_reports(offices: list, period: dict, config: dict, mock: bool =
 
     client = None
     if not mock:
-        token = os.environ.get("BUBBLE_API_TOKEN")
+        # .strip() because a token pasted into .env or a secrets UI very often
+        # picks up a trailing newline, which Bubble rejects as a bad token.
+        token = (os.environ.get("BUBBLE_API_TOKEN") or "").strip()
         if not token:
-            raise SystemExit("BUBBLE_API_TOKEN environment variable is not set.")
+            raise SystemExit(
+                "BUBBLE_API_TOKEN is not set.\n"
+                "  - Cloud routine / CI: set it as an environment variable or secret.\n"
+                "  - Local: put BUBBLE_API_TOKEN=... in a .env file beside this "
+                "script (see .env.example), or pass --env-file to use another file."
+            )
         # Production is the default/priority root; --use-test-version (manual
         # ad hoc runs only — never the scheduled task) switches to the named
         # test/staging root instead. Both are confirmed real endpoints
@@ -680,12 +694,21 @@ def main():
     parser.add_argument("--prev-period-start")
     parser.add_argument("--prev-period-end")
     parser.add_argument("--only-office", default=None, help="office_id to restrict to a single office")
+    parser.add_argument("--env-file", default=None,
+                         help="path to an env file supplying BUBBLE_API_TOKEN, instead of the "
+                              "default .env beside this script. Ignored if the variable is "
+                              "already set in the real environment.")
     parser.add_argument("--mock", action="store_true", help="use synthetic data, no Bubble access required")
     parser.add_argument("--use-test-version", action="store_true",
                          help="use config.json's bubble_base_url_test (the named Bubble test/staging "
                               "version) instead of bubble_base_url (production). For manual ad hoc runs "
                               "only — the scheduled task should never pass this.")
     args = parser.parse_args()
+
+    if args.env_file:
+        if not os.path.exists(args.env_file):
+            raise SystemExit(f"--env-file not found: {args.env_file}")
+        load_dotenv(args.env_file, override=True)
 
     with open(args.config) as f:
         config = json.load(f)

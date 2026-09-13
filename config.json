@@ -7,8 +7,6 @@
   "output_dir": "./reports",
   "drive_reports_folder_id": "1RMpaat0Ei9b3wJp6V9vOUK3_TzWLmNlX",
   "drive_reports_folder_name": "Quiet List Office Reports",
-  "bubble_token_drive_file_id": "1Qu66Wir6_Q77alqicN3J2ozRwa3drEP1C-_kDAWaswM",
-  "_bubble_token_todo": "UPDATED (2026-09-06) \u2014 bubble_token_drive_file_id points to a private GOOGLE DOC (title \"quiet-list-bubble-api-token\", at Drive root, NOT inside drive_reports_folder_id) whose entire text content is the Bubble API token. The user originally used a plain-text file for this (id 1P42uaO3SfJbK_vqRRET2OZaANCF74wE-, now trashed) but couldn't edit it directly in Drive, so switched to a Google Doc. As of 2026-09-06 the user has replaced the placeholder (\"12234\") with what appears to be a real token, though it hasn't been exercised against a real API call yet. Because this is a Google Doc, fetching it requires exporting as text (download_file_content with exportMimeType text/plain, or read_file_content) rather than a raw download, and Google's export prepends a UTF-8 BOM -- strip that plus surrounding whitespace/newlines before use. At runtime (live/non-mock runs only) the skill fetches this file's content this way and exports it as BUBBLE_API_TOKEN before invoking generate_report.py \u2014 never embed the token itself in this file or in the scheduled task's own prompt.",
   "match_field_map": {
     "_comment": "canonical name -> real Bubble field name on property_matches. Fully confirmed from the 2026-09-06 sample response (second sample, with a populated buyer's agent) -- see property_matches_schema_api_spec_v0.4.md. price_min/price_max are the BUYER'S BRIEF budget range (brief_min/max_price_number), not the listing price -- listing_price (property_listing_price_number) is the listing's own price and is used as a fallback only when a brief has no min/max set.",
     "match_id": "_id",
@@ -29,5 +27,6 @@
   "property_field_map": {
     "listing_id": "listing_id_text",
     "malcolm_listing_state": "malcolm_listing_state_option_os_malcolm_listing_state"
-  }
+  },
+  "_token_note": "The Bubble API token is supplied ONLY via the BUBBLE_API_TOKEN environment variable -- never stored in this file or anywhere else in the repo. Cloud routines/CI should inject it as a secret; local development reads it from a gitignored .env file (see .env.example), or from --env-file."
 }

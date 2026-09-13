@@ -46,34 +46,34 @@ The cloud environment needs **both** of these on its allowed-domains list:
 > separate CDN host — miss that one and setup fails before it ever reaches
 > Bubble.
 
+### The token
+
+`BUBBLE_API_TOKEN` is supplied **only** as an environment variable. It is
+never stored in the repo, in `config.json`, or in the routine's prompt.
+
+Set it as an environment variable / secret on the cloud environment. A real
+environment variable always takes precedence over `.env`, so no `.env` file
+needs to exist in the cloud at all — `.env` is purely a local-development
+convenience.
+
 ### Connectors
 
-Enable the **Google Drive** connector on the routine. It's used for two things:
-
-1. Reading the Bubble API token at runtime (see below)
-2. Uploading the finished PDFs, since cloud sessions are ephemeral
+Enable the **Google Drive** connector on the routine, so it can upload the
+finished PDFs — cloud sessions are ephemeral and the filesystem does not
+persist.
 
 Connector traffic is proxied through Anthropic's servers rather than the
 session's network, so it works regardless of the domain allowlist.
-
-### The token
-
-**Never commit the token, and never put it in the routine's prompt.** At
-runtime, read it from the private Google Doc `quiet-list-bubble-api-token`
-(its file ID is `bubble_token_drive_file_id` in `config.json`) via the Drive
-connector, and export it as `BUBBLE_API_TOKEN` before invoking the script.
-
-Because it's a Google Doc, it must be exported as text (not downloaded raw),
-and Google prepends a UTF-8 BOM — strip that plus surrounding whitespace.
 
 ### What the routine should do
 
 ```bash
 pip install -r requirements.txt
 playwright install chromium
-export BUBBLE_API_TOKEN=<fetched from Drive>
 python run_scheduled_report.py
 ```
+
+(with `BUBBLE_API_TOKEN` already present in the environment)
 
 `run_scheduled_report.py` is the scheduled entry point. It:
 
