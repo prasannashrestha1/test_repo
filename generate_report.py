@@ -30,17 +30,20 @@ STATUS / OPEN ITEMS (see property_matches_schema_api_spec_v0.5.md):
     among listings that were matched," not "total office inventory
     regardless of match activity" — the latter is no longer derivable at
     all, since a listing with zero matches never appears here to begin with.
-  - Which Bubble environment a run targets is resolved by resolve_base_url():
-    --use-test-version always wins (so an explicit staging request can never
-    be redirected to production by a stray env var), otherwise BUBBLE_BASE_URL
-    takes precedence over config.json's "bubble_base_url". That ordering is
-    what lets a cloud routine point at production without the production URL
-    ever being committed. Non-HTTPS roots are refused outright, since the
-    token travels as a Bearer header.
-  - PRODUCTION ACCESS IS DISABLED BY DEFAULT — config.json has no
-    "bubble_base_url" (see PRODUCTION_ACCESS_DISABLED.md), so unless
-    BUBBLE_BASE_URL is set, only --use-test-version and --mock runs work; a
-    plain run fails fast instead of silently reaching production.
+  - Which Bubble environment a run targets is resolved by resolve_base_url(),
+    and production requires TWO deliberate signals, not one: BUBBLE_ALLOW_
+    PRODUCTION must be truthy AND a production URL must be configured (via
+    BUBBLE_BASE_URL or config.json's "bubble_base_url"). Until BUBBLE_ALLOW_
+    PRODUCTION is set, every run — with or without --use-test-version —
+    always uses the test/staging root, so a stray BUBBLE_BASE_URL left in an
+    environment can never send a run to production by itself, and nobody has
+    to remember to pass --use-test-version for that guarantee to hold.
+    Non-HTTPS roots are refused outright, since the token travels as a
+    Bearer header.
+  - PRODUCTION ACCESS IS DISABLED BY DEFAULT (see PRODUCTION_ACCESS_DISABLED.md)
+    — every run uses test/staging until BUBBLE_ALLOW_PRODUCTION is explicitly
+    set, at which point BUBBLE_BASE_URL/config.json's "bubble_base_url" is
+    used instead.
   - The mapping from raw property_types/dwelling values to the coarse
     "Apartments" vs "Houses" split in Performance Overview is a guess
     (PROPERTY_CATEGORY_MAP below) — this WILL need tuning once real data
@@ -53,17 +56,18 @@ STATUS / OPEN ITEMS (see property_matches_schema_api_spec_v0.5.md):
     used as the fallback when a brief has no min/max set.
 
 USAGE
-  Real run against PRODUCTION — currently DISABLED, see
-  PRODUCTION_ACCESS_DISABLED.md. Fails fast with a clear config.json error
-  instead of reaching production:
+  Real run — currently ALWAYS goes to the TEST/staging root, whether or not
+  --use-test-version is passed, because BUBBLE_ALLOW_PRODUCTION is unset. See
+  PRODUCTION_ACCESS_DISABLED.md.
     export BUBBLE_API_TOKEN=xxxxx
     python3 generate_report.py \\
         --config config.json --offices-file offices.json \\
         --period-start 2026-07-01 --period-end 2026-07-31 \\
         --prev-period-start 2026-06-01 --prev-period-end 2026-06-30
 
-  Real run against the TEST/staging version instead — this is the only real
-  (non-mock) mode that currently works:
+  Same thing, spelled out explicitly with --use-test-version — behaves
+  identically right now, but keeps working the same way once production is
+  eventually enabled elsewhere:
     export BUBBLE_API_TOKEN=xxxxx
     python3 generate_report.py --use-test-version \\
         --config config.json --offices-file offices.json \\
@@ -589,28 +593,43 @@ def generate_report_for_office(office: dict, period: dict, config: dict,
     return output_path
 
 
+def _is_truthy_env(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def resolve_base_url(config: dict, use_test: bool) -> str:
     """Pick which Bubble API root to talk to.
 
-    --use-test-version always wins, so an explicit request for staging can
-    never be silently redirected to production by a stray BUBBLE_BASE_URL left
-    in someone's environment. Otherwise the environment variable takes
-    precedence over config.json — that is what lets a cloud routine target an
-    environment without the production URL ever being committed to the repo.
+    Production requires TWO deliberate, separate signals, not one:
+      1. BUBBLE_ALLOW_PRODUCTION set to a truthy value
+      2. a production URL, from BUBBLE_BASE_URL or config.json's "bubble_base_url"
+
+    Until BUBBLE_ALLOW_PRODUCTION is set, this ALWAYS resolves to the test
+    root — regardless of --use-test-version, regardless of whether
+    BUBBLE_BASE_URL happens to be set in someone's environment. That is the
+    point: a single stray env var can no longer send a run to production, and
+    no flag needs to be remembered for every invocation to stay safely on
+    test. --use-test-version still works as an explicit, self-documenting way
+    to say "use test" in a script, but it is no longer the only thing
+    standing between a run and production.
+
+    See PRODUCTION_ACCESS_DISABLED.md for how to actually enable production
+    when ready.
     """
-    if use_test:
+    allow_production = _is_truthy_env("BUBBLE_ALLOW_PRODUCTION")
+
+    if use_test or not allow_production:
         base_url = config.get("bubble_base_url_test")
         if not base_url:
-            raise SystemExit('--use-test-version given, but config.json has no "bubble_base_url_test".')
+            raise SystemExit('config.json has no "bubble_base_url_test" — nothing to run against.')
     else:
         base_url = (os.environ.get("BUBBLE_BASE_URL") or "").strip() or config.get("bubble_base_url")
         if not base_url:
             raise SystemExit(
-                "No Bubble API root configured. Either:\n"
-                "  - set BUBBLE_BASE_URL (how a cloud routine should target an environment), or\n"
-                '  - add "bubble_base_url" to config.json, or\n'
-                "  - pass --use-test-version to use the test/staging root.\n"
-                "Production is disabled on purpose — see PRODUCTION_ACCESS_DISABLED.md."
+                "BUBBLE_ALLOW_PRODUCTION is set, but no production URL is configured. Either:\n"
+                "  - set BUBBLE_BASE_URL, or\n"
+                '  - add "bubble_base_url" to config.json.\n'
+                "See PRODUCTION_ACCESS_DISABLED.md."
             )
 
     # The token rides on every request as a Bearer header; plaintext HTTP would
@@ -732,9 +751,9 @@ def main():
                               "already set in the real environment.")
     parser.add_argument("--mock", action="store_true", help="use synthetic data, no Bubble access required")
     parser.add_argument("--use-test-version", action="store_true",
-                         help="use config.json's bubble_base_url_test (the named Bubble test/staging "
-                              "version) instead of BUBBLE_BASE_URL/bubble_base_url. For manual ad hoc "
-                              "runs only — the scheduled task should never pass this.")
+                         help="explicitly use config.json's bubble_base_url_test. Currently the default "
+                              "for every run regardless of this flag, since BUBBLE_ALLOW_PRODUCTION is "
+                              "unset — pass it anyway to self-document intent in scripts.")
     parser.add_argument("--upload-to-drive", action="store_true",
                          help="upload generated PDFs to Drive (config.json's drive_reports_folder_id) "
                               "via GOOGLE_SERVICE_ACCOUNT_JSON. Off by default for manual CLI runs, so a "

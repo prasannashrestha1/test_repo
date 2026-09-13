@@ -1,50 +1,50 @@
 # Production Bubble access is intentionally disabled
 
 **As of 2026-09-11**, `config.json` no longer contains `bubble_base_url` (the
-production/live Bubble root). This was removed on purpose, not by accident —
-this pipeline is still actively being reworked (the Listings-snapshot object
-is being replaced by a per-match join against `property`'s
-`malcolm_listing_state_option_os_malcolm_listing_state` field, still being
-validated), and until that settles, nothing in this folder should be able to
-touch the live Quiet List data.
+production/live Bubble root). **As of 2026-09-13**, that's backed by a second,
+independent gate: `BUBBLE_ALLOW_PRODUCTION`, which must be explicitly set
+before a production URL is even considered.
+
+This is on purpose, not by accident — this pipeline is still actively being
+reworked (the Listings-snapshot object is being replaced by a per-match join
+against `property`'s `malcolm_listing_state_option_os_malcolm_listing_state`
+field, still being validated), and until that settles, nothing in this folder
+should be able to touch the live Quiet List data.
 
 ## What this means in practice
 
-- `generate_report.py` **without** `--use-test-version` and **without**
-  `--mock` will now fail immediately with:
-  ```
-  config.json is missing "bubble_base_url".
-  ```
-  instead of silently hitting production. This is deliberate fail-safe
-  behavior, not a bug.
-- `python generate_report.py --use-test-version ...` still works exactly as
-  before — it only ever reads `bubble_base_url_test`, which is untouched.
-- `python generate_report.py --mock ...` still works exactly as before too —
-  it never reads either URL.
-- **The two Windows scheduled tasks** (`QuietList_Report_Day1`,
-  `QuietList_Report_Day15`, via `run_scheduled_report.py`) call the pipeline
-  in production mode (`use_test=False`). They will still fire on the 1st/15th
-  as scheduled, but will now just log the "missing bubble_base_url" error to
-  `logs/scheduler.log` (or `logs/scheduled_run.log` for the local `.bat`
-  version) and exit — **they cannot reach production while this file is
-  missing the key.** No PDF gets generated on those days until this is
-  restored.
+- **Every real run goes to test/staging, unconditionally**, until
+  `BUBBLE_ALLOW_PRODUCTION` is explicitly set to a truthy value
+  (`1`/`true`/`yes`/`on`) — regardless of whether `--use-test-version` was
+  passed, and regardless of whether `BUBBLE_BASE_URL` happens to be set in
+  someone's environment. A single stray `BUBBLE_BASE_URL` left over from
+  testing something else can no longer send a run to production by itself.
+- `python generate_report.py --mock ...` still works exactly as before —
+  it never reads any URL at all.
+- **The scheduled entry point** (`run_scheduled_report.py`, whether via the
+  local Windows Task Scheduler jobs or a Claude Code routine) calls the
+  pipeline with `use_test=False` — but that no longer matters while
+  `BUBBLE_ALLOW_PRODUCTION` is unset, since the double-gate applies
+  regardless of that argument. It will keep firing on the 1st/15th and
+  successfully generating reports — against test/staging, not production —
+  until production is deliberately enabled below.
 
 ## How to restore production access
 
-Once the pipeline is confirmed working end-to-end against
-`--use-test-version` and everyone is ready for real runs, set an environment
-variable on whatever runs it:
+Two separate, deliberate actions are required — not one:
 
 ```
+BUBBLE_ALLOW_PRODUCTION=true
 BUBBLE_BASE_URL=https://app.quietlist.com.au/api/1.1/obj
 ```
 
-**Prefer this over editing `config.json`.** Committing the production URL puts
-it in git history permanently and permanently destroys the fail-safe described
-above — from then on, every checkout can reach production by default. Setting
-an environment variable keeps production reachable only where it's explicitly
-configured, and leaves the repo itself unable to touch live data.
+Set both as environment variables on whatever runs it. **Prefer this over
+editing `config.json`.** Committing the production URL there puts it in git
+history permanently and destroys the fail-safe for every future checkout —
+setting environment variables instead keeps production reachable only where
+someone has explicitly configured both of them, and leaves the repo itself
+unable to touch live data on its own.
 
-`--use-test-version` still overrides this variable, so a deliberate staging
-run stays on staging even on a box configured for production.
+`--use-test-version` still forces the test root even when both of the above
+are set, so a deliberate staging run always stays on staging no matter how
+the surrounding environment is configured.

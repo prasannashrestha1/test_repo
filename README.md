@@ -48,23 +48,33 @@ The cloud environment needs **both** of these on its allowed-domains list:
 
 ### Environment variables
 
-Set both of these on the cloud environment. Neither is ever stored in the
+Set `BUBBLE_API_TOKEN` on the cloud environment. It's never stored in the
 repo, in `config.json`, or in the routine's prompt.
 
 | Variable | Purpose |
 |---|---|
 | `BUBBLE_API_TOKEN` | The Bubble API token |
-| `BUBBLE_BASE_URL` | Which Bubble environment to target, e.g. `https://app.quietlist.com.au/api/1.1/obj` |
 
 Real environment variables take precedence over `.env`, so no `.env` file
 needs to exist in the cloud at all — that file is purely a local-development
 convenience.
 
-Keeping the base URL here rather than in `config.json` is deliberate: it means
-**the production URL never has to be committed.** A repo checkout on its own
-cannot reach live data; only an environment explicitly configured for
-production can. Must be `https://` — the token is sent as a Bearer header and
-plaintext HTTP is refused.
+**Production is currently double-gated and off by default — every run,
+including the routine, targets test/staging until this is deliberately
+changed.** Two separate variables, both required together, are what unlock
+production:
+
+| Variable | Purpose |
+|---|---|
+| `BUBBLE_ALLOW_PRODUCTION` | Must be a truthy value (`true`/`1`/`yes`/`on`) or production is never reachable, full stop |
+| `BUBBLE_BASE_URL` | Which Bubble environment to target, e.g. `https://app.quietlist.com.au/api/1.1/obj` — ignored unless the above is also set |
+
+See [PRODUCTION_ACCESS_DISABLED.md](PRODUCTION_ACCESS_DISABLED.md) for the
+full reasoning. Keeping the URL here rather than in `config.json` means the
+production URL never has to be committed; requiring the second variable means
+a stray `BUBBLE_BASE_URL` left over from something else can never silently
+send a run to production by itself. Must be `https://` — the token is sent as
+a Bearer header and plaintext HTTP is refused.
 
 ### What the routine should do
 
@@ -74,8 +84,9 @@ playwright install chromium
 python run_scheduled_report.py
 ```
 
-(with `BUBBLE_API_TOKEN`, `BUBBLE_BASE_URL`, and `GOOGLE_SERVICE_ACCOUNT_JSON`
-already present in the environment)
+(with `BUBBLE_API_TOKEN` and `GOOGLE_SERVICE_ACCOUNT_JSON` already present in
+the environment — this runs against test/staging until `BUBBLE_ALLOW_PRODUCTION`
+and `BUBBLE_BASE_URL` are both also set)
 
 `run_scheduled_report.py` is the scheduled entry point. It:
 
