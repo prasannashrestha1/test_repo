@@ -1,21 +1,55 @@
-# Secrets — NEVER commit. .env.example is the committed template instead.
+# ---------------------------------------------------------------------------
+# SECRETS — never commit. The only env file that belongs in git is the
+# placeholder template .env.example.
+#
+# The negation must stay AFTER the patterns above it, or it won't take effect.
+# ---------------------------------------------------------------------------
 .env
+.env.*
 *.env
 !.env.example
 
-# Generated output
+# Credential files that tooling tends to drop in by default — notably Google
+# service-account keys, which this will need if PDF upload to Drive is ever
+# wired up.
+*credentials*.json
+service-account*.json
+client_secret*.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+.netrc
+
+# ---------------------------------------------------------------------------
+# Generated output — regenerated on every run, and the PDFs contain client data
+# ---------------------------------------------------------------------------
 reports/
 logs/
 *.rendered.html
 
+# ---------------------------------------------------------------------------
 # Python
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
+*$py.class
 venv/
 .venv/
+env/
+ENV/
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
 
+# ---------------------------------------------------------------------------
 # OS / editor cruft
+# ---------------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+desktop.ini
 *.swp
+*~
+.idea/
+.vscode/
