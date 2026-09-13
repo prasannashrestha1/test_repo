@@ -1,0 +1,16 @@
+listing_id_text,malcolm_id_text,name_text,list_of_suburbs_list_text,property_type_option_os_property_type,property_category_option_os_property_category,no_of_bedrooms_number,no_of_bathrooms_number,no_of_parkings_number,backend_price_number,price_advertise_as_text,price_display_text,malcolm_listing_state_option_os_malcolm_listing_state
+QL-1001,QL-1001,23 Gwayne Street,SURRY HILLS NSW 2010,House,Residential,4,2,2,2450000,"$2,450,000",FOR SALE,CURRENT
+QL-1002,QL-1002,8 Trafalgar Street,PADDINGTON NSW 2021,Terrace,Residential,3,2,1,2850000,"$2,850,000",FOR SALE,CURRENT
+QL-1003,QL-1003,142 Oxford Street,PADDINGTON NSW 2021,Apartment,Residential,2,1,1,1150000,"$1,150,000",FOR SALE,CURRENT
+QL-1004,QL-1004,5 Marion Street,REDFERN NSW 2016,Terrace,Residential,3,2,1,1680000,"$1,680,000",FOR SALE,CURRENT
+QL-1005,QL-1005,17 Cascade Street,PADDINGTON NSW 2021,House,Residential,4,2,2,3200000,"$3,200,000",FOR SALE,CURRENT
+QL-1006,QL-1006,61 Denison Street,WOOLLAHRA NSW 2025,House,Residential,4,2,2,4100000,"$4,100,000",FOR SALE,CURRENT
+QL-1007,QL-1007,204/12 Bourke Street,WOOLLOOMOOLOO NSW 2011,Apartment,Residential,2,1,1,980000,"$980,000",FOR SALE,CURRENT
+QL-1008,QL-1008,9 Rose Street,DARLINGHURST NSW 2010,Terrace,Residential,3,2,1,1920000,"$1,920,000",FOR SALE,CURRENT
+QL-1009,QL-1009,33 Glebe Point Road,GLEBE NSW 2037,Semi,Residential,3,1,1,1750000,"$1,750,000",FOR SALE,CURRENT
+QL-1010,QL-1010,76 St Johns Road,GLEBE NSW 2037,Apartment,Residential,2,1,1,890000,"$890,000",FOR SALE,CURRENT
+QL-1011,QL-1011,14 Darling Street,BALMAIN NSW 2041,Terrace,Residential,3,2,1,2100000,"$2,100,000",FOR SALE,CURRENT
+QL-1012,QL-1012,2/45 Curtin Crescent,ROZELLE NSW 2039,Unit,Residential,2,1,1,720000,"$720,000",FOR SALE,CURRENT
+QL-1013,QL-1013,88 King Street,NEWTOWN NSW 2042,Terrace,Residential,3,2,1,1540000,"$1,540,000",FOR SALE,CURRENT
+QL-1014,QL-1014,19 Angel Street,NEWTOWN NSW 2042,House,Residential,4,2,2,1890000,"$1,890,000",FOR SALE,CURRENT
+QL-1015,QL-1015,6 Mitchell Road,REDFERN NSW 2016,Apartment,Residential,2,1,1,1050000,"$1,050,000",FOR SALE,CURRENT

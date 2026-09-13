@@ -1,0 +1,51 @@
+office_id_text,property_listing_id_text,property_address_text,suburbs_list_text,property_type_option_os_property_type,property_listing_price_number,matched_date1_date,brief_title_text,brief_min_price_number,brief_max_price_number,buyers_agent_name_text,buyers_agency_name_text
+23,QL-1001,23 Gwayne Street,SURRY HILLS NSW 2010,House,2450000,2026-08-20T08:00:00.000Z,Riverside Dream,2300000,2550000,Dan Solo,Unicorn Buyers Agents
+23,QL-1001,23 Gwayne Street,SURRY HILLS NSW 2010,House,2450000,2026-08-21T09:07:00.000Z,Weekend Warrior,2250000,2450000,Leon Jacques,Aurum Advisory
+23,QL-1001,23 Gwayne Street,SURRY HILLS NSW 2010,House,2450000,2026-08-22T10:14:00.000Z,Forever Home,2200000,2550000,Sam Green,Advantage Buyer's Agents
+1,QL-1002,8 Trafalgar Street,PADDINGTON NSW 2021,Terrace,2850000,2026-08-23T11:21:00.000Z,Brand New Day,2600000,2900000,Priya Nair,Sterling Property Buyers
+1,QL-1002,8 Trafalgar Street,PADDINGTON NSW 2021,Terrace,2850000,2026-08-24T12:28:00.000Z,Investment Play,2700000,2850000,Marcus Webb,Coastal Buyer Co
+1,QL-1002,8 Trafalgar Street,PADDINGTON NSW 2021,Terrace,2850000,2026-08-25T13:35:00.000Z,Weekend Warrior,2600000,2850000,Ella Ford,Bresic Whitney Buyers
+1,QL-1002,8 Trafalgar Street,PADDINGTON NSW 2021,Terrace,2850000,2026-08-26T14:42:00.000Z,Growing Family Brief,2550000,2900000,Ravi Chandra,Unicorn Buyers Agents
+1,QL-1003,142 Oxford Street,PADDINGTON NSW 2021,Apartment,1150000,2026-08-27T15:49:00.000Z,Weekend Warrior,900000,1150000,Dan Solo,Aurum Advisory
+1,QL-1003,142 Oxford Street,PADDINGTON NSW 2021,Apartment,1150000,2026-08-28T16:56:00.000Z,Downsizer Search,800000,1200000,Leon Jacques,Advantage Buyer's Agents
+1,QL-1003,142 Oxford Street,PADDINGTON NSW 2021,Apartment,1150000,2026-08-29T17:03:00.000Z,Family First Home,900000,1150000,Sam Green,Sterling Property Buyers
+2,QL-1004,5 Marion Street,REDFERN NSW 2016,Terrace,1680000,2026-08-30T08:10:00.000Z,City Fringe Search,1380000,1730000,Priya Nair,Coastal Buyer Co
+2,QL-1004,5 Marion Street,REDFERN NSW 2016,Terrace,1680000,2026-08-31T09:17:00.000Z,Village Life,1330000,1730000,Marcus Webb,Bresic Whitney Buyers
+2,QL-1004,5 Marion Street,REDFERN NSW 2016,Terrace,1680000,2026-09-01T10:24:00.000Z,Empty Nester Move,1430000,1730000,Ella Ford,Unicorn Buyers Agents
+2,QL-1004,5 Marion Street,REDFERN NSW 2016,Terrace,1680000,2026-09-02T11:31:00.000Z,Empty Nester Move,1480000,1680000,Ravi Chandra,Aurum Advisory
+1,QL-1005,17 Cascade Street,PADDINGTON NSW 2021,House,3200000,2026-09-03T12:38:00.000Z,Forever Home,2850000,3300000,Dan Solo,Advantage Buyer's Agents
+1,QL-1005,17 Cascade Street,PADDINGTON NSW 2021,House,3200000,2026-09-04T13:45:00.000Z,Weekend Warrior,2850000,3200000,Leon Jacques,Sterling Property Buyers
+1,QL-1005,17 Cascade Street,PADDINGTON NSW 2021,House,3200000,2026-08-20T14:52:00.000Z,Investment Play,3050000,3300000,Sam Green,Coastal Buyer Co
+3,QL-1006,61 Denison Street,WOOLLAHRA NSW 2025,House,4100000,2026-08-21T15:59:00.000Z,City Fringe Search,3850000,4100000,Priya Nair,Bresic Whitney Buyers
+3,QL-1006,61 Denison Street,WOOLLAHRA NSW 2025,House,4100000,2026-08-22T16:06:00.000Z,First Home Buyer,3900000,4150000,Marcus Webb,Unicorn Buyers Agents
+3,QL-1006,61 Denison Street,WOOLLAHRA NSW 2025,House,4100000,2026-08-23T17:13:00.000Z,Inner West Hunt,3850000,4150000,Ella Ford,Aurum Advisory
+3,QL-1007,204/12 Bourke Street,WOOLLOOMOOLOO NSW 2011,Apartment,980000,2026-08-24T08:20:00.000Z,Weekend Warrior,680000,1030000,Ravi Chandra,Advantage Buyer's Agents
+3,QL-1007,204/12 Bourke Street,WOOLLOOMOOLOO NSW 2011,Apartment,980000,2026-08-25T09:27:00.000Z,Downsizer Search,730000,1080000,Dan Solo,Sterling Property Buyers
+3,QL-1007,204/12 Bourke Street,WOOLLOOMOOLOO NSW 2011,Apartment,980000,2026-08-26T10:34:00.000Z,Harbourside Search,780000,1030000,Leon Jacques,Coastal Buyer Co
+4,QL-1008,9 Rose Street,DARLINGHURST NSW 2010,Terrace,1920000,2026-08-27T11:41:00.000Z,Empty Nester Move,1570000,2020000,Sam Green,Bresic Whitney Buyers
+4,QL-1008,9 Rose Street,DARLINGHURST NSW 2010,Terrace,1920000,2026-08-28T12:48:00.000Z,City Fringe Search,1620000,1970000,Priya Nair,Unicorn Buyers Agents
+4,QL-1008,9 Rose Street,DARLINGHURST NSW 2010,Terrace,1920000,2026-08-29T13:55:00.000Z,Village Life,1770000,1920000,Marcus Webb,Aurum Advisory
+4,QL-1008,9 Rose Street,DARLINGHURST NSW 2010,Terrace,1920000,2026-08-30T14:02:00.000Z,Family First Home,1620000,1970000,Ella Ford,Advantage Buyer's Agents
+5,QL-1009,33 Glebe Point Road,GLEBE NSW 2037,Semi,1750000,2026-08-31T15:09:00.000Z,Inner West Hunt,1450000,1850000,Ravi Chandra,Sterling Property Buyers
+5,QL-1009,33 Glebe Point Road,GLEBE NSW 2037,Semi,1750000,2026-09-01T16:16:00.000Z,Harbourside Search,1450000,1800000,Dan Solo,Coastal Buyer Co
+5,QL-1009,33 Glebe Point Road,GLEBE NSW 2037,Semi,1750000,2026-09-02T17:23:00.000Z,Downsizer Search,1450000,1800000,Leon Jacques,Bresic Whitney Buyers
+5,QL-1010,76 St Johns Road,GLEBE NSW 2037,Apartment,890000,2026-09-03T08:30:00.000Z,Empty Nester Move,590000,990000,Sam Green,Unicorn Buyers Agents
+5,QL-1010,76 St Johns Road,GLEBE NSW 2037,Apartment,890000,2026-09-04T09:37:00.000Z,Harbourside Search,540000,990000,Priya Nair,Aurum Advisory
+5,QL-1010,76 St Johns Road,GLEBE NSW 2037,Apartment,890000,2026-08-20T10:44:00.000Z,Downsizer Search,540000,890000,Marcus Webb,Advantage Buyer's Agents
+5,QL-1010,76 St Johns Road,GLEBE NSW 2037,Apartment,890000,2026-08-21T11:51:00.000Z,City Fringe Search,590000,890000,Ella Ford,Sterling Property Buyers
+6,QL-1011,14 Darling Street,BALMAIN NSW 2041,Terrace,2100000,2026-08-22T12:58:00.000Z,Downsizer Search,1950000,2200000,Ravi Chandra,Coastal Buyer Co
+6,QL-1011,14 Darling Street,BALMAIN NSW 2041,Terrace,2100000,2026-08-23T13:05:00.000Z,Harbourside Search,1700000,2100000,Dan Solo,Bresic Whitney Buyers
+6,QL-1011,14 Darling Street,BALMAIN NSW 2041,Terrace,2100000,2026-08-24T14:12:00.000Z,Empty Nester Move,1700000,2150000,Leon Jacques,Unicorn Buyers Agents
+6,QL-1012,2/45 Curtin Crescent,ROZELLE NSW 2039,Unit,720000,2026-08-25T15:19:00.000Z,Executive Relocation,370000,720000,Sam Green,Aurum Advisory
+6,QL-1012,2/45 Curtin Crescent,ROZELLE NSW 2039,Unit,720000,2026-08-26T16:26:00.000Z,Village Life,470000,820000,Priya Nair,Advantage Buyer's Agents
+6,QL-1012,2/45 Curtin Crescent,ROZELLE NSW 2039,Unit,720000,2026-08-27T17:33:00.000Z,Family First Home,370000,770000,Marcus Webb,Sterling Property Buyers
+7,QL-1013,88 King Street,NEWTOWN NSW 2042,Terrace,1540000,2026-08-28T08:40:00.000Z,First Home Buyer,1240000,1540000,Ella Ford,Coastal Buyer Co
+7,QL-1013,88 King Street,NEWTOWN NSW 2042,Terrace,1540000,2026-08-29T09:47:00.000Z,Riverside Dream,1290000,1640000,Ravi Chandra,Bresic Whitney Buyers
+7,QL-1013,88 King Street,NEWTOWN NSW 2042,Terrace,1540000,2026-08-30T10:54:00.000Z,City Fringe Search,1240000,1540000,Dan Solo,Unicorn Buyers Agents
+7,QL-1014,19 Angel Street,NEWTOWN NSW 2042,House,1890000,2026-08-31T11:01:00.000Z,Growing Family Brief,1540000,1990000,Leon Jacques,Aurum Advisory
+7,QL-1014,19 Angel Street,NEWTOWN NSW 2042,House,1890000,2026-09-01T12:08:00.000Z,Village Life,1690000,1940000,Sam Green,Advantage Buyer's Agents
+7,QL-1014,19 Angel Street,NEWTOWN NSW 2042,House,1890000,2026-09-02T13:15:00.000Z,Forever Home,1590000,1990000,Priya Nair,Sterling Property Buyers
+7,QL-1014,19 Angel Street,NEWTOWN NSW 2042,House,1890000,2026-09-03T14:22:00.000Z,First Home Buyer,1640000,1940000,Marcus Webb,Coastal Buyer Co
+2,QL-1015,6 Mitchell Road,REDFERN NSW 2016,Apartment,1050000,2026-09-04T15:29:00.000Z,Forever Home,900000,1100000,Ella Ford,Bresic Whitney Buyers
+2,QL-1015,6 Mitchell Road,REDFERN NSW 2016,Apartment,1050000,2026-08-20T16:36:00.000Z,Investment Play,800000,1050000,Ravi Chandra,Unicorn Buyers Agents
+2,QL-1015,6 Mitchell Road,REDFERN NSW 2016,Apartment,1050000,2026-08-21T17:43:00.000Z,First Home Buyer,900000,1150000,Dan Solo,Aurum Advisory

@@ -1,0 +1,21 @@
+# Secrets — NEVER commit. .env.example is the committed template instead.
+.env
+*.env
+!.env.example
+
+# Generated output
+reports/
+logs/
+*.rendered.html
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp

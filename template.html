@@ -1,0 +1,441 @@
+<!--
+  template.html — Quiet List Exchange Activity Report
+  Jinja2 template. Rendered HTML is then converted to PDF (Playwright/Chromium print-to-pdf
+  or WeasyPrint — either works with this CSS).
+
+  EXPECTED CONTEXT (filled by generate_report.py):
+  {
+    office_name: str,                      e.g. "Sydney Sooth"
+    reporting_period_label: str,           e.g. "FORTNIGHTLY ACTIVITY REPORT"  (or "MONTHLY...")
+    period_range_label: str,               e.g. "01 JULY - 31 JULY 2026"
+    prepared_for: str,                     e.g. "Will Gosse"
+    report_date_label: str,                e.g. "06 AUGUST 2026"
+
+    helpful_tip: str,                      static or per-office compliance tip text
+
+    exec_snapshot: [                       exactly 4 rows in the sample; list-driven so it can flex
+      {label: str, result: str, change: str, positive: bool}
+    ],
+
+    performance_overview: [                one row per property type
+      {property_type: str, listings: str, matches: str}
+    ],
+
+    featured_listing_address: str,
+    featured_listing_caption: str,         default: "Highest number of matches."
+    top_suburb_display: str,               e.g. "PADDINGTON, NSW 2021"
+    budget_range_display: str,             e.g. "$2,400,000 - $3,000,000"
+    dwelling_type_display: str,
+    top_agencies: [str, str, str],         up to 3
+    top_operatives: [str, str, str],       up to 3
+
+    commentary: [str, ...],                each item is one bullet paragraph
+
+    listing_pages: [                       pre-chunked by generate_report.py (~15 rows/column)
+      {left: [str, ...], right: [str, ...]}
+    ],
+    matched_listings_period_label: str,    e.g. "01/07/26 - 31/07/26"
+
+    footer_contact: str,                   default: "quietlist.com.au | info@quietlist.com.au"
+    logo_text: str                         default: "QUIET LIST"
+  }
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{{ office_name }} — Quiet List Exchange Activity Report</title>
+<style>
+  /* margin:0 on @page + padding on .page below — Chromium's print-to-pdf does NOT
+     paint CSS backgrounds into the @page margin area, so a nonzero @page margin
+     here would leave a white border around every page. Padding keeps the same
+     visual inset while the .page background still covers the full physical page. */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: #efeee7;
+    color: #000000;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.4;
+  }
+  .page {
+    background: #efeee7;
+    page-break-after: always;
+    width: 210mm;
+    height: 297mm; /* full physical A4 page — background must reach every edge */
+    padding: 18mm 16mm 16mm 16mm; /* visual margin, replaces the old @page margin */
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .page:last-child { page-break-after: auto; }
+  .page-body { flex: 1 1 auto; }
+
+  /* ---------- header ---------- */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 6mm;
+    margin-bottom: 5mm;
+  }
+  .header-title { flex: 1 1 auto; min-width: 0; }
+  .office-name {
+    font-size: 24pt;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin: 0;
+    font-stretch: condensed;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .report-subtitle {
+    font-size: 11pt;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #000000;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .header-meta {
+    flex: 0 0 auto;
+    max-width: 65mm;
+    text-align: right;
+    font-size: 9pt;
+    color: #105652;
+  }
+  .header-meta div { margin-bottom: 2px; }
+  .header-meta b { color: #000000; }
+
+  /* ---------- section headings ---------- */
+  .section-label {
+    color: #105652;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    font-size: 9pt;
+    margin: 0;
+    line-height: 1.25;
+  }
+
+  /* label sits beside its table, top-aligned — matches the sample's sidebar layout */
+  .labeled-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6mm;
+    margin-bottom: 4mm;
+  }
+  .row-label { flex: 0 0 30mm; padding-top: 1.5mm; }
+  .row-content { flex: 1 1 auto; min-width: 0; }
+
+  /* ---------- executive snapshot / performance tables ---------- */
+  table.plain {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 4mm;
+  }
+  table.plain thead th {
+    text-align: center;
+    font-size: 8pt;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 1.3mm 3mm;
+    border-bottom: 1.5px solid #105652;
+  }
+  table.plain thead th:first-child { text-align: left; }
+  table.plain tbody td {
+    text-align: center;
+    padding: 1.6mm 3mm;
+    border-bottom: 0.75px solid #b9c4bf;
+    font-size: 9pt;
+  }
+  table.plain tbody td:first-child {
+    text-align: left;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+    font-size: 8.5pt;
+  }
+  .positive { color: #105652; font-weight: 700; }
+  .negative { color: #ff3131; font-weight: 700; }
+
+  .two-col {
+    display: flex;
+    gap: 6mm;
+    align-items: stretch;
+    margin-bottom: 4mm;
+  }
+  .two-col .perf-table-wrap { flex: 1 1 auto; }
+  .tip-circle {
+    flex: 0 0 32mm;
+    width: 32mm;
+    height: 32mm;
+    border-radius: 50%;
+    background: #105652;
+    color: #efeee7;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 3mm;
+    font-size: 6.5pt;
+  }
+  .tip-circle .tip-title {
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-size: 7.5pt;
+    margin-bottom: 1.5mm;
+  }
+
+  /* ---------- key insights panel ---------- */
+  .insights-panel {
+    background: #105652;
+    color: #efeee7;
+    padding: 4mm 7mm;
+    display: flex;
+    gap: 8mm;
+    margin-bottom: 4mm;
+  }
+  .insights-title {
+    text-align: center;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-size: 9pt;
+    margin: 0 0 2.5mm 0;
+  }
+  .insights-col { flex: 1 1 0; font-size: 8pt; }
+  .insights-col.center { text-align: center; }
+  .insights-col.right ol { text-align: right; }
+  .insight-block { margin-bottom: 3mm; }
+  .insight-label {
+    font-style: italic;
+    font-weight: 700;
+    margin-bottom: 1mm;
+  }
+  .insights-col ol {
+    margin: 0;
+    padding-left: 4.5mm;
+  }
+  .insights-col.right ol { padding-left: 0; padding-right: 4.5mm; }
+  .insights-col li { margin-bottom: 1mm; }
+
+  /* ---------- commentary ---------- */
+  .commentary ul {
+    margin: 0;
+    padding-left: 5mm;
+  }
+  .commentary li {
+    margin-bottom: 2mm;
+    font-size: 8.5pt;
+  }
+
+  /* ---------- matched listings pages ---------- */
+  .listings-heading {
+    font-size: 20pt;
+    font-weight: 800;
+    text-transform: uppercase;
+    margin: 0 0 6mm 0;
+  }
+  .listings-heading .x { color: #105652; font-style: italic; }
+  .listings-period {
+    color: #105652;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-size: 9pt;
+    margin-bottom: 6mm;
+  }
+  table.listings {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1.5px solid #000000;
+  }
+  table.listings td {
+    border: 1.5px solid #000000;
+    padding: 3mm 4mm;
+    font-size: 9pt;
+    text-align: center;
+    width: 50%;
+  }
+
+  /* ---------- footer ---------- */
+  .footer {
+    margin-top: auto;
+    padding-top: 3mm;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 7.5pt;
+    color: #000000;
+  }
+  .footer-logo {
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-size: 10pt;
+    text-align: right;
+    line-height: 1.1;
+  }
+</style>
+</head>
+<body>
+
+  <!-- ================= PAGE 1: SUMMARY ================= -->
+  <div class="page">
+   <div class="page-body">
+    <div class="header">
+      <div class="header-title">
+        <p class="office-name">{{ office_name }}</p>
+        <p class="report-subtitle">Quiet List Exchange Activity Report</p>
+      </div>
+      <div class="header-meta">
+        <div>{{ reporting_period_label }}: <b>{{ office_name }}</b></div>
+        <div>REPORTING PERIOD: <b>{{ period_range_label }}</b></div>
+        <div>PREPARED FOR: <b>{{ prepared_for }}</b></div>
+        <div>DATE: <b>{{ report_date_label }}</b></div>
+      </div>
+    </div>
+
+    <div class="labeled-row">
+      <div class="row-label"><p class="section-label">Executive Snapshot</p></div>
+      <div class="row-content">
+        <table class="plain">
+          <thead>
+            <tr><th>Metric</th><th>Result</th><th>Change vs. Previous Period</th></tr>
+          </thead>
+          <tbody>
+            {% for row in exec_snapshot %}
+            <tr>
+              <td>{{ row.label }}</td>
+              <td>{{ row.result }}</td>
+              <td class="{{ 'positive' if row.positive else 'negative' }}">{{ row.change }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="labeled-row">
+      <div class="row-label"><p class="section-label">Performance Overview</p></div>
+      <div class="row-content">
+        <div class="two-col">
+          <div class="perf-table-wrap">
+            <table class="plain">
+              <thead>
+                <tr><th>Property Type</th><th>Listings</th><th>Matches</th></tr>
+              </thead>
+              <tbody>
+                {% for row in performance_overview %}
+                <tr>
+                  <td>{{ row.property_type }}</td>
+                  <td>{{ row.listings }}</td>
+                  <td>{{ row.matches }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="tip-circle">
+            <div class="tip-title">Helpful Tip</div>
+            <div>{{ helpful_tip }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="insights-panel">
+      <div class="insights-col">
+        <p class="insights-title">Key Insights</p>
+        <div class="insight-block">
+          <div class="insight-label">Featured Listing</div>
+          <div>{{ featured_listing_address }}</div>
+          <div style="margin-top:1.5mm;">{{ featured_listing_caption }}</div>
+        </div>
+        <div class="insight-block">
+          <div class="insight-label">Top Performing Suburb</div>
+          <div>{{ top_suburb_display }}</div>
+        </div>
+      </div>
+      <div class="insights-col center">
+        <p class="insights-title" style="visibility:hidden;">.</p>
+        <div class="insight-block">
+          <div class="insight-label">Most active budget range.</div>
+          <div>{{ budget_range_display }}</div>
+        </div>
+        <div class="insight-block">
+          <div class="insight-label">Most active dwelling type.</div>
+          <div>{{ dwelling_type_display }}</div>
+        </div>
+      </div>
+      <div class="insights-col right">
+        <p class="insights-title" style="visibility:hidden;">.</p>
+        <div class="insight-block">
+          <div class="insight-label">Most Active Buyer's Agencies</div>
+          <ol>
+            {% for agency in top_agencies %}<li>{{ agency }}</li>{% endfor %}
+          </ol>
+        </div>
+        <div class="insight-block">
+          <div class="insight-label">Operative</div>
+          <ol>
+            {% for op in top_operatives %}<li>{{ op }}</li>{% endfor %}
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <p class="section-label">Commentary:</p>
+    <div class="commentary">
+      <ul>
+        {% for point in commentary %}<li>{{ point }}</li>{% endfor %}
+      </ul>
+    </div>
+   </div>
+
+    <div class="footer">
+      <div>{{ footer_contact }}</div>
+      <div class="footer-logo">{{ logo_text }}</div>
+    </div>
+  </div>
+
+  <!-- ================= PAGES 2..N: MATCHED LISTINGS ================= -->
+  {% for lp in listing_pages %}
+  <div class="page">
+   <div class="page-body">
+    <p class="listings-heading">{{ office_name }} <span class="x">x</span> Quiet List.</p>
+    <p class="listings-period">Matched Listings:<br>{{ matched_listings_period_label }}</p>
+
+    <table class="listings">
+      {% for i in range(lp.left|length if lp.left|length > lp.right|length else lp.right|length) %}
+      <tr>
+        <td>{{ lp.left[i] if i < lp.left|length else '' }}</td>
+        <td>{{ lp.right[i] if i < lp.right|length else '' }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+   </div>
+
+    <div class="footer">
+      <div>{{ footer_contact }}</div>
+      <div class="footer-logo">{{ logo_text }}</div>
+    </div>
+  </div>
+  {% endfor %}
+
+</body>
+</html>
