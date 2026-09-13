@@ -30,10 +30,17 @@ STATUS / OPEN ITEMS (see property_matches_schema_api_spec_v0.5.md):
     among listings that were matched," not "total office inventory
     regardless of match activity" — the latter is no longer derivable at
     all, since a listing with zero matches never appears here to begin with.
-  - PRODUCTION ACCESS IS CURRENTLY DISABLED — config.json has no
-    "bubble_base_url" (see PRODUCTION_ACCESS_DISABLED.md). Only
-    --use-test-version and --mock runs work right now; a plain run fails
-    fast with a clear error instead of silently reaching production.
+  - Which Bubble environment a run targets is resolved by resolve_base_url():
+    --use-test-version always wins (so an explicit staging request can never
+    be redirected to production by a stray env var), otherwise BUBBLE_BASE_URL
+    takes precedence over config.json's "bubble_base_url". That ordering is
+    what lets a cloud routine point at production without the production URL
+    ever being committed. Non-HTTPS roots are refused outright, since the
+    token travels as a Bearer header.
+  - PRODUCTION ACCESS IS DISABLED BY DEFAULT — config.json has no
+    "bubble_base_url" (see PRODUCTION_ACCESS_DISABLED.md), so unless
+    BUBBLE_BASE_URL is set, only --use-test-version and --mock runs work; a
+    plain run fails fast instead of silently reaching production.
   - The mapping from raw property_types/dwelling values to the coarse
     "Apartments" vs "Houses" split in Performance Overview is a guess
     (PROPERTY_CATEGORY_MAP below) — this WILL need tuning once real data
@@ -582,6 +589,38 @@ def generate_report_for_office(office: dict, period: dict, config: dict,
     return output_path
 
 
+def resolve_base_url(config: dict, use_test: bool) -> str:
+    """Pick which Bubble API root to talk to.
+
+    --use-test-version always wins, so an explicit request for staging can
+    never be silently redirected to production by a stray BUBBLE_BASE_URL left
+    in someone's environment. Otherwise the environment variable takes
+    precedence over config.json — that is what lets a cloud routine target an
+    environment without the production URL ever being committed to the repo.
+    """
+    if use_test:
+        base_url = config.get("bubble_base_url_test")
+        if not base_url:
+            raise SystemExit('--use-test-version given, but config.json has no "bubble_base_url_test".')
+    else:
+        base_url = (os.environ.get("BUBBLE_BASE_URL") or "").strip() or config.get("bubble_base_url")
+        if not base_url:
+            raise SystemExit(
+                "No Bubble API root configured. Either:\n"
+                "  - set BUBBLE_BASE_URL (how a cloud routine should target an environment), or\n"
+                '  - add "bubble_base_url" to config.json, or\n'
+                "  - pass --use-test-version to use the test/staging root.\n"
+                "Production is disabled on purpose — see PRODUCTION_ACCESS_DISABLED.md."
+            )
+
+    # The token rides on every request as a Bearer header; plaintext HTTP would
+    # put it on the wire in the clear.
+    if not base_url.startswith("https://"):
+        raise SystemExit(f"Refusing to send the API token over a non-HTTPS connection: {base_url}")
+
+    return base_url
+
+
 def generate_all_reports(offices: list, period: dict, config: dict, mock: bool = False,
                           only_office: str = None, use_test: bool = False) -> dict:
     if only_office:
@@ -599,14 +638,7 @@ def generate_all_reports(offices: list, period: dict, config: dict, mock: bool =
                 "  - Local: put BUBBLE_API_TOKEN=... in a .env file beside this "
                 "script (see .env.example), or pass --env-file to use another file."
             )
-        # Production is the default/priority root; --use-test-version (manual
-        # ad hoc runs only — never the scheduled task) switches to the named
-        # test/staging root instead. Both are confirmed real endpoints
-        # (2026-09-06), not placeholders.
-        base_url_key = "bubble_base_url_test" if use_test else "bubble_base_url"
-        base_url = config.get(base_url_key)
-        if not base_url:
-            raise SystemExit(f"config.json is missing \"{base_url_key}\".")
+        base_url = resolve_base_url(config, use_test)
         client = BubbleClient(base_url, token, config.get("page_size", 100))
 
     successes = []

@@ -46,15 +46,25 @@ The cloud environment needs **both** of these on its allowed-domains list:
 > separate CDN host — miss that one and setup fails before it ever reaches
 > Bubble.
 
-### The token
+### Environment variables
 
-`BUBBLE_API_TOKEN` is supplied **only** as an environment variable. It is
-never stored in the repo, in `config.json`, or in the routine's prompt.
+Set both of these on the cloud environment. Neither is ever stored in the
+repo, in `config.json`, or in the routine's prompt.
 
-Set it as an environment variable / secret on the cloud environment. A real
-environment variable always takes precedence over `.env`, so no `.env` file
-needs to exist in the cloud at all — `.env` is purely a local-development
+| Variable | Purpose |
+|---|---|
+| `BUBBLE_API_TOKEN` | The Bubble API token |
+| `BUBBLE_BASE_URL` | Which Bubble environment to target, e.g. `https://app.quietlist.com.au/api/1.1/obj` |
+
+Real environment variables take precedence over `.env`, so no `.env` file
+needs to exist in the cloud at all — that file is purely a local-development
 convenience.
+
+Keeping the base URL here rather than in `config.json` is deliberate: it means
+**the production URL never has to be committed.** A repo checkout on its own
+cannot reach live data; only an environment explicitly configured for
+production can. Must be `https://` — the token is sent as a Bearer header and
+plaintext HTTP is refused.
 
 ### Connectors
 

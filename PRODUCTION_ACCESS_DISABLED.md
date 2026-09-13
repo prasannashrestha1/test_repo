@@ -33,13 +33,18 @@ touch the live Quiet List data.
 ## How to restore production access
 
 Once the pipeline is confirmed working end-to-end against
-`--use-test-version` and everyone is ready for real scheduled runs, add the
-key back to `config.json`:
+`--use-test-version` and everyone is ready for real runs, set an environment
+variable on whatever runs it:
 
-```json
-"bubble_base_url": "https://app.quietlist.com.au/api/1.1/obj",
+```
+BUBBLE_BASE_URL=https://app.quietlist.com.au/api/1.1/obj
 ```
 
-(Right alongside the existing `"bubble_base_url_test"` line.) That's the only
-change needed — no code changes required, since `generate_report.py` already
-reads this key normally when present.
+**Prefer this over editing `config.json`.** Committing the production URL puts
+it in git history permanently and permanently destroys the fail-safe described
+above — from then on, every checkout can reach production by default. Setting
+an environment variable keeps production reachable only where it's explicitly
+configured, and leaves the repo itself unable to touch live data.
+
+`--use-test-version` still overrides this variable, so a deliberate staging
+run stays on staging even on a box configured for production.
