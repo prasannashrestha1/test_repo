@@ -28,23 +28,18 @@ def bullet_stock_vs_matches(office_name, listings_current, listings_previous,
     opener = "Following" if listings_pct >= 0 else "Despite"
 
     if listings_pct < 0 and matches_pct >= 0:
-        closing = ("This suggests the current listing mix is more closely aligned with "
-                   "active buyer demand, with stronger engagement across a smaller portfolio.")
+        closing = "aligning with buyer demand"
     elif listings_pct >= 0 and matches_pct >= 0:
-        closing = ("This reflects both a larger pool of available stock and sustained "
-                   "buyer engagement across the period.")
+        closing = "reflecting sustained engagement"
     elif listings_pct < 0 and matches_pct < 0:
-        closing = ("This reflects reduced stock feeding through to lower overall buyer "
-                   "engagement this period.")
+        closing = "lowering buyer engagement"
     else:
-        closing = ("Despite the larger pool of available stock, buyer engagement eased "
-                   "back this period.")
+        closing = "engagement eased slightly"
 
     return (
-        f"{opener} {listings_dir} of {abs(listings_pct):.0f}% in available stock compared to "
-        f"the previous reporting period ({listings_current} listings vs {listings_previous}), "
-        f"buyer matching activity {matches_verb} from {matches_previous} to {matches_current} "
-        f"matches. {closing}"
+        f"{opener} {listings_dir} of {abs(listings_pct):.0f}% in stock "
+        f"({listings_current} vs {listings_previous}), matches {matches_verb} from "
+        f"{matches_previous} to {matches_current} — {closing}."
     )
 
 
@@ -59,36 +54,27 @@ def bullet_top_suburbs(office_name, top_suburbs, matches_current) -> str:
     elif len(rest) == 1:
         rest_str = f"{rest[0][0]} ({rest[0][1]})"
 
-    covered_pct = sum(c for _, c in top) / matches_current * 100 if matches_current else 0
-
-    return (
-        f"{lead_suburb} continues to be {office_name}'s strongest demand driver, recording "
-        f"{lead_count} buyer matches, followed by {rest_str}. Buyer activity across these "
-        f"top {len(top)} suburbs accounted for {covered_pct:.0f}% of all matches this period."
-    )
+    return f"{lead_suburb} leads with {lead_count} matches, followed by {rest_str}."
 
 
 def bullet_budget_and_dwelling(budget_range_display, budget_range_share_pct,
                                 dwelling_type_display) -> str:
     return (
-        f"Demand was strongest in the {budget_range_display} price segment, with "
-        f"{dwelling_type_display} listings drawing the most buyer interest. This band "
-        f"represented {budget_range_share_pct:.0f}% of all matches this period."
+        f"Demand was strongest in the {budget_range_display} segment, led by "
+        f"{dwelling_type_display} listings ({budget_range_share_pct:.0f}% of matches)."
     )
 
 
 def bullet_featured_listing(featured_address, featured_count,
                              second_tier_min, second_tier_max) -> str:
     if second_tier_min == second_tier_max:
-        second_tier_clause = f"attracted {second_tier_min} matches each"
+        second_tier_clause = f"{second_tier_min} matches each"
     else:
-        second_tier_clause = f"attracted between {second_tier_min} and {second_tier_max} matches"
+        second_tier_clause = f"between {second_tier_min} and {second_tier_max} matches"
 
     return (
-        f"{featured_address} generated the highest level of buyer interest with "
-        f"{featured_count} qualified matches, while the next-highest listings {second_tier_clause}. "
-        f"Buyer demand is therefore being distributed across multiple quality listings rather "
-        f"than concentrated around a single standout property."
+        f"{featured_address} led interest with {featured_count} matches; the next-highest "
+        f"listings drew {second_tier_clause}."
     )
 
 
@@ -104,11 +90,9 @@ def bullet_property_type_split(performance_overview) -> str:
     a, b = enriched[0], enriched[1]
 
     return (
-        f"{a['property_type']} generated {a['matches']} buyer matches from {a['listings']} "
-        f"listings, compared with {b['matches']} matches from {b['listings']} "
-        f"{b['property_type'].lower()} listings. While demand remains active across both asset "
-        f"types, {a['property_type'].lower()} continue to attract the highest level of buyer "
-        f"brief relevance this period."
+        f"{a['property_type']} led with {a['matches']} matches from {a['listings']} listings "
+        f"vs {b['matches']} from {b['listings']} {b['property_type'].lower()} — strongest "
+        f"buyer-brief relevance this period."
     )
 
 

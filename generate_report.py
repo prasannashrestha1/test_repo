@@ -518,7 +518,7 @@ def build_report_context(office: dict, period: dict, matches_current: list, matc
         "report_date_label": datetime.now().strftime("%d %B %Y").upper(),
         "helpful_tip": office.get(
             "helpful_tip",
-            "Buyer's Agents are required to have AML obligations completed before brief can enter the exchange.",
+            "Buyer's Agents must complete AML checks before a brief can enter the exchange.",
         ),
         "exec_snapshot": exec_snapshot,
         "performance_overview": performance_overview,

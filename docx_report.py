@@ -37,7 +37,7 @@ from xml.sax.saxutils import escape as _xml_escape
 
 from docx import Document
 from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.shared import Cm, Mm, Pt, RGBColor
@@ -218,7 +218,7 @@ def _set_cell_bottom_border(cell, color_hex: str, sz: int):
 
 
 def _add_circle_shape(paragraph, diameter_mm, fill_hex, title, body_text,
-                       title_size_pt=7, body_size_pt=6):
+                       title_size_pt=7.5, body_size_pt=6.5):
     """Inserts a true circular shape (DrawingML ellipse) with centered text
     into a paragraph, matching template.html's .tip-circle (border-radius:
     50%). python-docx has no shape-drawing API at all, so this is hand-built
@@ -255,7 +255,8 @@ def _add_circle_shape(paragraph, diameter_mm, fill_hex, title, body_text,
             <wps:txbx>
               <w:txbxContent>
                 <w:p>
-                  <w:pPr><w:jc w:val="center"/></w:pPr>
+                  <!-- .tip-circle .tip-title margin-bottom: 1.5mm -->
+                  <w:pPr><w:jc w:val="center"/><w:spacing w:after="85"/></w:pPr>
                   <w:r>
                     <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:color w:val="FFFFFF"/><w:sz w:val="{title_sz}"/></w:rPr>
                     <w:t>{_xml_escape(title)}</w:t>
@@ -270,7 +271,8 @@ def _add_circle_shape(paragraph, diameter_mm, fill_hex, title, body_text,
                 </w:p>
               </w:txbxContent>
             </wps:txbx>
-            <wps:bodyPr wrap="square" lIns="91440" tIns="91440" rIns="91440" bIns="91440" anchor="ctr">
+            <!-- .tip-circle padding: 3mm, i.e. 108000 EMU per side -->
+            <wps:bodyPr wrap="square" lIns="108000" tIns="108000" rIns="108000" bIns="108000" anchor="ctr">
               <a:spAutoFit/>
             </wps:bodyPr>
           </wps:wsp>
@@ -285,13 +287,19 @@ def _add_circle_shape(paragraph, diameter_mm, fill_hex, title, body_text,
 
 def _labeled_row(doc, label_text: str):
     """Matches template.html's .labeled-row: a narrow label column (.row-label,
-    30mm/~3cm in the CSS) beside a wider content column (.row-content) — a
-    sidebar layout, not a heading placed above the content. Returns the
-    content cell for the caller to build into."""
-    wrap = doc.add_table(rows=1, cols=2)
+    30mm/~3cm in the CSS) beside a wider content column (.row-content), with
+    a 6mm gap between them (CSS `gap: 6mm` on the flex row) — a sidebar
+    layout, not a heading placed above the content. The middle column here is
+    that gap, given a table's own columns otherwise sit flush against each
+    other with nothing between them. Returns the content cell (now the third
+    column) for the caller to build into."""
+    wrap = doc.add_table(rows=1, cols=3)
     _no_borders(wrap)
-    _set_col_widths(wrap, [3.0, 14.8])
-    label_cell, content_cell = wrap.cell(0, 0), wrap.cell(0, 1)
+    _set_col_widths(wrap, [3.0, 0.6, 14.2])
+    label_cell, content_cell = wrap.cell(0, 0), wrap.cell(0, 2)
+    # .row-label { padding-top: 1.5mm } -- nudges the label down to align
+    # with the table header baseline instead of its own top edge.
+    _set_cell_margins(label_cell, top_mm=1.5)
     _para(label_cell, label_text, size=9, bold=True, color=TEAL, upper=True)
     return content_cell
 
@@ -306,6 +314,7 @@ def render_docx(context: dict, output_path: str):
     # whatever the installed Word's own default template happens to be.
     normal = doc.styles["Normal"]
     normal.font.name = "Arial"
+    normal.font.size = Pt(10.5)  # html, body { font-size: 10.5pt } baseline
     normal.element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
     # Word's own default template usually adds ~8-10pt space after every
     # paragraph — template.html's margins are much tighter (4-6mm gaps
@@ -336,13 +345,15 @@ def render_docx(context: dict, output_path: str):
 
     # ================= PAGE 1: SUMMARY =================
 
-    header_table = doc.add_table(rows=1, cols=2)
+    # .header { gap: 6mm } -- a middle spacer column, same approach as
+    # _labeled_row, since a table's columns otherwise sit flush together.
+    header_table = doc.add_table(rows=1, cols=3)
     _no_borders(header_table)
-    _set_col_widths(header_table, [11.0, 6.8])
+    _set_col_widths(header_table, [10.4, 0.6, 6.8])
     left = header_table.cell(0, 0)
     _para(left, context["office_name"], size=24, bold=True, upper=True)
     _para(left, "Quiet List Exchange Activity Report", size=11, bold=True, upper=True)
-    right = header_table.cell(0, 1)
+    right = header_table.cell(0, 2)
     for label, value in (
         (context["reporting_period_label"], context["office_name"]),
         ("REPORTING PERIOD", context["period_range_label"]),
@@ -353,19 +364,26 @@ def render_docx(context: dict, output_path: str):
         _set_run(p.add_run(f"{label}: "), size=9, color=TEAL)
         _set_run(p.add_run(value), size=9, bold=True, color=BLACK)
 
-    _spacer(doc, pt=3)
+    # .header { margin-bottom: 5mm }
+    _spacer(doc, pt=Mm(5).pt)
     exec_content = _labeled_row(doc, "Executive Snapshot")
     exec_table = exec_content.add_table(rows=1, cols=3)
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     hdr = exec_table.rows[0].cells
+    # Word's default (autofit) column widths don't leave the first column as
+    # much room as a browser's own table auto-layout does for the same
+    # markup, so the longest header ("Change vs. Previous Period") and
+    # labels ("Total Current Status Listings") were wrapping to 2 lines here
+    # even though they don't in the PDF. Sized down a notch so they fit on
+    # one line without needing to touch the column widths themselves.
     for i, label in enumerate(("Metric", "Result", "Change vs. Previous Period")):
-        _para(hdr[i], label, size=8, bold=True, upper=True,
+        _para(hdr[i], label, size=7, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
         _set_cell_bottom_border(hdr[i], "105652", 12)
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["exec_snapshot"]:
         cells = exec_table.add_row().cells
-        _para(cells[0], row["label"], size=8.5, bold=True, upper=True)
+        _para(cells[0], row["label"], size=6.5, bold=True, upper=True)
         _para(cells[1], row["result"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["change"], size=9, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER,
               color=TEAL if row["positive"] else RED)
@@ -374,23 +392,29 @@ def render_docx(context: dict, output_path: str):
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
     _clear_empty_leading_paragraph(exec_content)
 
-    _spacer(doc, pt=3)
+    # table.plain's own margin-bottom (4mm, inside row-content) plus
+    # .labeled-row's margin-bottom (4mm, after the whole row) stack to 8mm
+    # of real gap in the HTML before the next labeled row begins.
+    _spacer(doc, pt=Mm(8).pt)
     perf_content = _labeled_row(doc, "Performance Overview")
-    perf_wrap = perf_content.add_table(rows=1, cols=2)
+    # .two-col { gap: 6mm } -- middle spacer column, same approach as above.
+    perf_wrap = perf_content.add_table(rows=1, cols=3)
     _no_borders(perf_wrap)
-    _set_col_widths(perf_wrap, [9.0, 5.8])
-    perf_cell, tip_cell = perf_wrap.cell(0, 0), perf_wrap.cell(0, 1)
+    _set_col_widths(perf_wrap, [10.0, 0.6, 3.6])
+    perf_cell, tip_cell = perf_wrap.cell(0, 0), perf_wrap.cell(0, 2)
 
     perf_table = perf_cell.add_table(rows=1, cols=3)
     hdr = perf_table.rows[0].cells
+    # Same one-line fix as the Executive Snapshot table above, kept
+    # consistent between the two tables sharing this style.
     for i, label in enumerate(("Property Type", "Listings", "Matches")):
-        _para(hdr[i], label, size=8, bold=True, upper=True,
+        _para(hdr[i], label, size=7, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
         _set_cell_bottom_border(hdr[i], "105652", 12)
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["performance_overview"]:
         cells = perf_table.add_row().cells
-        _para(cells[0], row["property_type"], size=8.5, bold=True, upper=True)
+        _para(cells[0], row["property_type"], size=6.5, bold=True, upper=True)
         _para(cells[1], row["listings"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         for cell in cells:
@@ -414,7 +438,9 @@ def render_docx(context: dict, output_path: str):
     perf_wrap.rows[0].height = Mm(circle_diameter_mm + 2)
     _clear_empty_leading_paragraph(perf_content)
 
-    _spacer(doc, pt=3)
+    # .two-col's own margin-bottom (4mm) plus .labeled-row's (4mm) stack to
+    # 8mm, same reasoning as the Executive Snapshot gap above.
+    _spacer(doc, pt=Mm(8).pt)
     insights = doc.add_table(rows=1, cols=3)
     _no_borders(insights)
     _set_col_widths(insights, [5.93, 5.93, 5.94])
@@ -428,46 +454,112 @@ def render_docx(context: dict, output_path: str):
     _set_cell_margins(col2, top_mm=4, bottom_mm=4, left_mm=4, right_mm=4)
     _set_cell_margins(col3, top_mm=4, bottom_mm=4, left_mm=4, right_mm=7)
 
-    _para(col1, "Key Insights", size=9, bold=True, color=WHITE, upper=True)
-    _para(col1, "Featured Listing", size=8, bold=True, italic=True, color=WHITE)
-    _para(col1, context["featured_listing_address"], size=8, color=WHITE)
-    _para(col1, context["featured_listing_caption"], size=8, color=WHITE)
-    _para(col1, "Top Performing Suburb", size=8, bold=True, italic=True, color=WHITE)
-    _para(col1, context["top_suburb_display"], size=8, color=WHITE)
+    # .insights-title { text-align: center; margin-bottom: 2.5mm } -- applies
+    # to all three columns' titles, including col1's real "Key Insights" (not
+    # just the invisible placeholders in col2/col3 below), so it's centered
+    # like the other two, not left-aligned.
+    title_gap = Pt(Mm(2.5).pt)
+    p = _para(col1, "Key Insights", size=9, bold=True, color=WHITE, upper=True,
+              align=WD_ALIGN_PARAGRAPH.CENTER)
+    p.paragraph_format.space_after = title_gap
 
-    _para(col2, "Most active budget range.", size=8, bold=True, italic=True, color=WHITE,
-          align=WD_ALIGN_PARAGRAPH.CENTER)
-    _para(col2, context["budget_range_display"], size=8, color=WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
-    _para(col2, "Most active dwelling type.", size=8, bold=True, italic=True, color=WHITE,
-          align=WD_ALIGN_PARAGRAPH.CENTER)
-    _para(col2, context["dwelling_type_display"], size=8, color=WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+    # .insights-col { font-size: 8pt } -- nudged down to 7.5pt here only,
+    # a deliberate docx-specific compromise: the extra vertical gaps just
+    # added above (title/block margins) are accurate to the CSS but, unlike
+    # the PDF's own text, push Word's page count from 2 to 3. Shrinking this
+    # one block's font a half-point recovers most of that without cutting
+    # any of the actual commentary content below.
+    INSIGHT_BODY_SIZE = 7.5
 
-    _para(col3, "Most Active Buyer's Agencies", size=8, bold=True, italic=True, color=WHITE,
-          align=WD_ALIGN_PARAGRAPH.RIGHT)
+    def _insight_block(cell, label, *lines, align=None, gap_before_last=None):
+        # .insight-block { margin-bottom: 3mm } -- one call per block; the
+        # optional gap_before_last reproduces a single line's own
+        # margin-top (e.g. the featured-listing caption) between two lines
+        # that would otherwise sit back-to-back.
+        _para(cell, label, size=INSIGHT_BODY_SIZE, bold=True, italic=True, color=WHITE, align=align)
+        for i, line in enumerate(lines):
+            lp = _para(cell, line, size=INSIGHT_BODY_SIZE, color=WHITE, align=align)
+            if i > 0 and gap_before_last is not None:
+                lp.paragraph_format.space_before = gap_before_last
+        cell.paragraphs[-1].paragraph_format.space_after = Pt(Mm(3).pt)
+
+    _insight_block(col1, "Featured Listing", context["featured_listing_address"],
+                    context["featured_listing_caption"],
+                    gap_before_last=Pt(Mm(1.5).pt))
+    _insight_block(col1, "Top Performing Suburb", context["top_suburb_display"])
+
+    # col2/col3 have no real title of their own -- template.html reserves an
+    # invisible placeholder line (visibility:hidden) so all three columns'
+    # actual content still starts at the same height. A run coloured to
+    # match the panel's own teal background does the same job here: present
+    # for layout, invisible against the fill.
+    for c in (col2, col3):
+        ph = _para(c, " ", size=9, bold=True, color=TEAL, align=WD_ALIGN_PARAGRAPH.CENTER)
+        ph.paragraph_format.space_after = title_gap
+
+    _insight_block(col2, "Most active budget range.", context["budget_range_display"],
+                    align=WD_ALIGN_PARAGRAPH.CENTER)
+    _insight_block(col2, "Most active dwelling type.", context["dwelling_type_display"],
+                    align=WD_ALIGN_PARAGRAPH.CENTER)
+
+    _para(col3, "Most Active Buyer's Agencies", size=INSIGHT_BODY_SIZE, bold=True, italic=True,
+          color=WHITE, align=WD_ALIGN_PARAGRAPH.RIGHT)
     for i, name in enumerate(context["top_agencies"], 1):
-        _para(col3, f"{i}. {name}", size=8, color=WHITE, align=WD_ALIGN_PARAGRAPH.RIGHT)
-    _para(col3, "Operative", size=8, bold=True, italic=True, color=WHITE,
+        _para(col3, f"{i}. {name}", size=INSIGHT_BODY_SIZE, color=WHITE,
+              align=WD_ALIGN_PARAGRAPH.RIGHT)
+    col3.paragraphs[-1].paragraph_format.space_after = Pt(Mm(3).pt)
+    _para(col3, "Operative", size=INSIGHT_BODY_SIZE, bold=True, italic=True, color=WHITE,
           align=WD_ALIGN_PARAGRAPH.RIGHT)
     for i, name in enumerate(context["top_operatives"], 1):
-        _para(col3, f"{i}. {name}", size=8, color=WHITE, align=WD_ALIGN_PARAGRAPH.RIGHT)
+        _para(col3, f"{i}. {name}", size=INSIGHT_BODY_SIZE, color=WHITE,
+              align=WD_ALIGN_PARAGRAPH.RIGHT)
+    col3.paragraphs[-1].paragraph_format.space_after = Pt(Mm(3).pt)
 
-    _spacer(doc, pt=3)
+    # .insights-panel { margin-bottom: 4mm }
+    _spacer(doc, pt=Mm(4).pt)
     _para(doc, "Commentary:", size=9, bold=True, color=TEAL, upper=True)
     for bullet in context["commentary"]:
-        _para(doc, bullet, size=8.5, style="List Bullet")
+        # .commentary li { font-size: 8.5pt; margin-bottom: 2mm } -- nudged
+        # down to 8pt here, the other half of the docx-specific compromise
+        # described above: keeps the full commentary text intact rather than
+        # cutting it, while still recovering the vertical room the CSS-
+        # accurate section gaps above now take up.
+        p = _para(doc, bullet, size=7.5, style="List Bullet")
+        p.paragraph_format.space_after = Pt(Mm(2).pt)
 
     # ================= PAGES 2..N: MATCHED LISTINGS =================
-    for page in context["listing_pages"]:
-        doc.add_page_break()
+    for i, page in enumerate(context["listing_pages"]):
+        if i == 0:
+            # add_page_break() creates a whole new paragraph just to hold the
+            # break character -- even with its line spacing collapsed to
+            # near-zero, that paragraph is still a distinct object needing
+            # its own (however tiny) sliver of room, and the Summary page
+            # above is packed right to its very last drop with nothing left
+            # to give. Attaching the break to a run on the last existing
+            # paragraph (the final commentary bullet) instead avoids adding
+            # a paragraph at all, so there's nothing left that needs room.
+            doc.paragraphs[-1].add_run().add_break(WD_BREAK.PAGE)
+        else:
+            # Later listing pages break from a full table page, not a
+            # packed summary page, so a dedicated page-break paragraph here
+            # is the normal, safe case.
+            doc.add_page_break()
         heading = doc.add_paragraph()
         _set_run(heading.add_run(f"{context['office_name']} "), size=20, bold=True, upper=True)
         _set_run(heading.add_run("x"), size=20, bold=True, italic=True, color=TEAL, upper=True)
         _set_run(heading.add_run(" Quiet List."), size=20, bold=True, upper=True)
+        # .listings-heading { margin-bottom: 6mm }
+        heading.paragraph_format.space_after = Pt(Mm(6).pt)
 
-        p = doc.add_paragraph()
-        _set_run(p.add_run("Matched Listings:"), size=9, bold=True, color=TEAL, upper=True)
-        p2 = doc.add_paragraph()
-        _set_run(p2.add_run(context["matched_listings_period_label"]), size=9, bold=True, color=TEAL)
+        # template.html renders "Matched Listings:" and the period on two
+        # lines of ONE paragraph via <br>, with a single margin-bottom: 6mm
+        # after the whole two-line block -- a real line break within one
+        # paragraph, not two separate paragraphs, matches that directly.
+        period = doc.add_paragraph()
+        _set_run(period.add_run("Matched Listings:"), size=9, bold=True, color=TEAL, upper=True)
+        period.add_run().add_break()
+        _set_run(period.add_run(context["matched_listings_period_label"]), size=9, bold=True, color=TEAL)
+        period.paragraph_format.space_after = Pt(Mm(6).pt)
 
         rows = max(len(page["left"]), len(page["right"]))
         listing_table = doc.add_table(rows=rows, cols=2)
