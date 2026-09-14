@@ -1,116 +1,113 @@
-"""email_report.py — emails generated report PDFs via SMTP.
+"""email_report.py — emails generated report files via the SendGrid Web API.
 
-This is a single self-contained function. It reads each PDF from disk and
-hands the bytes to Python's own email/smtplib standard-library modules, which
-do MIME/base64 encoding internally, in memory, on whatever machine runs this
-script. That encoding never has to pass through an LLM's context to happen —
-it's the same plumbing every email client uses, just invisible.
+Switched from Gmail SMTP: a Claude Code cloud routine's network sandbox is a
+domain allowlist over HTTPS/443 only, not general TCP, so SMTP's port 587
+was unreachable from the routine no matter what (smtp.gmail.com itself was
+reachable, TLS/auth all worked locally) -- this is a sandbox limitation, not
+a bug in the SMTP code. SendGrid's Mail Send endpoint is a plain HTTPS POST,
+so the exact same call works both locally and from the routine once its
+domain is allowlisted.
 
-No third-party package, no API key, no paid service — smtplib and email are
-both in the Python standard library. All that's needed is a Gmail "App
-Password" (Google Account -> Security -> 2-Step Verification -> App
-Passwords — a 2-minute setup, and NOT your real Gmail password).
+No SMTP, no smtplib, no new dependency -- `requests` (already required by
+generate_report.py for the Bubble API) posts directly to
+https://api.sendgrid.com/v3/mail/send with the API key as a Bearer token.
 
-Credentials come from SMTP_USERNAME / SMTP_PASSWORD environment variables —
-never committed, never printed. Sending is a deliberate no-op, not an error,
-when they aren't configured, so mock/test-version runs and local development
-never need email access at all.
+One-time setup:
+  1. Create a SendGrid account (sendgrid.com) -- the free tier (100
+     emails/day) covers this use case.
+  2. Verify a sender: Settings -> Sender Authentication -> either verify a
+     single email address ("Single Sender Verification" -- fastest, just
+     click a confirmation link sent to it) or authenticate a whole domain
+     (better deliverability, needs a few DNS records added at your domain
+     registrar). Whichever address ends up verified is what
+     SENDGRID_FROM_EMAIL below must be set to -- SendGrid silently rejects
+     sends from an unverified address.
+  3. Create an API key: Settings -> API Keys -> Create API Key. Restricted
+     Access with only "Mail Send" enabled is enough; Full Access isn't needed.
+  4. Set these as environment variables / secrets (never in config.json,
+     never committed):
+       SENDGRID_API_KEY   - the key from step 3 (a secret)
+       SENDGRID_FROM_EMAIL - the verified address from step 2 (not secret,
+                             but still an env var so it isn't hard-coded)
+  5. If running as a Claude Code routine, allowlist api.sendgrid.com on the
+     cloud environment's network access settings -- the same "Allowed
+     domains" list app.quietlist.com.au is already on.
+
+Sending is a deliberate no-op, not an error, when either variable is unset,
+so mock/test-version runs and local development never need email access at
+all.
 """
+import base64
 import mimetypes
 import os
-import smtplib
-import socket
-from email.mime.application import MIMEApplication
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+
+import requests
+
+SENDGRID_ENDPOINT = "https://api.sendgrid.com/v3/mail/send"
 
 
-def _connect_smtp_ipv4(host: str, port: int, timeout: int) -> smtplib.SMTP:
-    """Connect to an SMTP host forcing IPv4, then hand back a normal SMTP
-    object as if smtplib.SMTP(host, port) had connected directly.
-
-    Some sandboxed environments have no IPv6 support in their network
-    namespace at all. smtp.gmail.com resolves to both IPv4 and IPv6
-    addresses, and Python's default connection logic can try IPv6 first --
-    in such a sandbox that fails immediately with
-    "OSError: [Errno 97] Address family not supported by protocol" (EAFNOSUPPORT),
-    never falling back to the IPv4 address that would have worked fine.
-    Resolving to a concrete IPv4 address ourselves and connecting to that
-    sidesteps the family-selection question entirely.
-
-    The original hostname is restored onto the connected object afterward,
-    because starttls() needs it for TLS server-name verification against
-    Gmail's certificate -- verifying against the raw IP would fail that
-    check even though the underlying socket is IPv4.
-    """
-    ipv4_addr = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
-    server = smtplib.SMTP(timeout=timeout)
-    server.connect(ipv4_addr, port)
-    server._host = host  # noqa: SLF001 — restores the hostname for starttls()'s certificate check
-    return server
-
-
-def send_report_email(pdf_paths: list, to_addrs: list, subject: str = None, body: str = None) -> dict:
-    """Email every file in pdf_paths as attachments, in one message, to to_addrs.
-    Despite the name (kept for backward compatibility with existing callers),
-    this works for any file type, not just PDFs -- e.g. the .docx report.
+def send_report_email(paths: list, to_addrs: list, subject: str = None, body: str = None) -> dict:
+    """Email every file in paths as attachments, in one message, to to_addrs.
+    Works for any file type -- PDFs and the .docx report alike.
 
     Returns {"status": ..., ...}:
       "sent"    — delivered; includes "to" and "count"
       "skipped" — not an error; includes "reason" (no files/recipients/credentials)
       "failed"  — includes "error"
     """
-    if not pdf_paths:
+    if not paths:
         return {"status": "skipped", "reason": "no files to send"}
 
     if not to_addrs:
         print("no recipients configured — skipping email delivery")
         return {"status": "skipped", "reason": "no recipients"}
 
-    # .strip() because a password pasted into .env or a secrets UI routinely
-    # picks up a trailing newline, which SMTP auth then rejects.
-    username = (os.environ.get("SMTP_USERNAME") or "").strip()
-    password = (os.environ.get("SMTP_PASSWORD") or "").strip()
-    if not username or not password:
-        print("SMTP_USERNAME/SMTP_PASSWORD not set — skipping email delivery")
-        return {"status": "skipped", "reason": "no SMTP credentials configured"}
-
-    host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-    port = int(os.environ.get("SMTP_PORT", "587"))
+    # .strip() because a key pasted into a secrets UI routinely picks up a
+    # trailing newline, which an Authorization header then sends literally.
+    api_key = (os.environ.get("SENDGRID_API_KEY") or "").strip()
+    from_email = (os.environ.get("SENDGRID_FROM_EMAIL") or "").strip()
+    if not api_key or not from_email:
+        print("SENDGRID_API_KEY/SENDGRID_FROM_EMAIL not set — skipping email delivery")
+        return {"status": "skipped", "reason": "no SendGrid credentials configured"}
 
     try:
-        msg = MIMEMultipart()
-        msg["From"] = username
-        msg["To"] = ", ".join(to_addrs)
-        msg["Subject"] = subject or "Quiet List Exchange Activity Report"
-        msg.attach(MIMEText(
-            body or "Attached: the latest Quiet List Exchange Activity Report(s).",
-            "plain",
-        ))
-
-        # A missing/unreadable file (e.g. from a bad path) must fail cleanly
-        # too, not just an SMTP-connection problem — this whole block is one
-        # try so nothing here can crash the caller.
-        for path in pdf_paths:
+        attachments = []
+        for path in paths:
             mime_type, _ = mimetypes.guess_type(path)
-            # MIMEApplication wants the subtype only ("pdf", not "application/pdf");
-            # falls back to a generic binary subtype for anything guess_type
-            # doesn't recognize, rather than mislabeling every attachment as a PDF.
-            subtype = mime_type.split("/", 1)[1] if mime_type else "octet-stream"
             with open(path, "rb") as f:
-                part = MIMEApplication(f.read(), _subtype=subtype)
-            part.add_header("Content-Disposition", "attachment", filename=os.path.basename(path))
-            msg.attach(part)
+                content_b64 = base64.b64encode(f.read()).decode("ascii")
+            attachments.append({
+                "content": content_b64,
+                "filename": os.path.basename(path),
+                "type": mime_type or "application/octet-stream",
+                "disposition": "attachment",
+            })
 
-        server = _connect_smtp_ipv4(host, port, timeout=30)
-        try:
-            server.starttls()
-            server.login(username, password)
-            server.sendmail(username, to_addrs, msg.as_string())
-        finally:
-            server.quit()
-        print(f"emailed {len(pdf_paths)} report(s) to {', '.join(to_addrs)}")
-        return {"status": "sent", "to": to_addrs, "count": len(pdf_paths)}
+        payload = {
+            "personalizations": [{"to": [{"email": addr} for addr in to_addrs]}],
+            "from": {"email": from_email},
+            "subject": subject or "Quiet List Exchange Activity Report",
+            "content": [{
+                "type": "text/plain",
+                "value": body or "Attached: the latest Quiet List Exchange Activity Report(s).",
+            }],
+            "attachments": attachments,
+        }
+
+        response = requests.post(
+            SENDGRID_ENDPOINT,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json=payload,
+            timeout=30,
+        )
+        # SendGrid returns 202 with an empty body on success; on failure the
+        # real reason (bad key, unverified sender, etc.) is in the response
+        # body, which is far more useful to surface than a bare status code.
+        if response.status_code != 202:
+            raise RuntimeError(f"SendGrid returned {response.status_code}: {response.text}")
+
+        print(f"emailed {len(paths)} report file(s) to {', '.join(to_addrs)}")
+        return {"status": "sent", "to": to_addrs, "count": len(paths)}
     except Exception as e:  # noqa: BLE001 — a failed send must not crash the caller
         print(f"FAILED to send report email: {e}")
         return {"status": "failed", "error": str(e)}

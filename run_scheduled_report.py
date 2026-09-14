@@ -57,15 +57,19 @@ def main() -> int:
         offices = json.load(f)
 
     period = period_dict(window)
+    # Loops over every office in offices.json (generate_all_reports only
+    # restricts to one when only_office is passed, which it isn't here) —
+    # one PDF + one .docx per office, all delivered in this same run.
     summary = generate_all_reports(offices, period, config, mock=False, use_test=False)
 
-    pdf_paths = [s["path"] for s in summary.get("successes", [])]
+    successes = summary.get("successes", [])
+    all_paths = [s["path"] for s in successes] + [s["docx_path"] for s in successes]
 
-    upload_results = upload_reports(pdf_paths, config.get("drive_reports_folder_id"))
+    upload_results = upload_reports(all_paths, config.get("drive_reports_folder_id"))
     upload_failures = [r for r in upload_results if r["status"] == "failed"]
 
     to_addrs = recipients_from_config(config)
-    email_result = send_report_email(pdf_paths, to_addrs)
+    email_result = send_report_email(all_paths, to_addrs)
     email_failed = email_result["status"] == "failed"
 
     # A PDF that generated but wasn't actually delivered anywhere is not

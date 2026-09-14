@@ -20,7 +20,7 @@ git remote add origin https://github.com/YOUR_ORG/YOUR_REPO.git
 git push -u origin main
 ```
 
-**2. Allowlist two domains** on the Claude Code cloud environment the routine
+**2. Allowlist three domains** on the Claude Code cloud environment the routine
 will use (Admin settings → Cloud environments → the environment → Network
 access → Custom → Allowed domains):
 
@@ -28,10 +28,14 @@ access → Custom → Allowed domains):
 |---|---|
 | `app.quietlist.com.au` | The Bubble Data API itself |
 | `cdn.playwright.dev` | Chromium download for `playwright install` |
+| `api.sendgrid.com` | Sending the report email (see Emailing reports below) |
 
 PyPI is allowlisted by default, so `pip install` needs no configuration — but
 Playwright's *browser binary* comes from a separate host, and missing it
-means setup fails before ever reaching Bubble.
+means setup fails before ever reaching Bubble. Email uses SendGrid's HTTPS
+API specifically *because* the routine's network sandbox is a domain
+allowlist over HTTPS/443 only — plain SMTP (port 587) is unreachable from it
+no matter what, so raw SMTP (e.g. a Gmail app password) will never work here.
 
 **3. Set environment variables / secrets on the routine.** At minimum:
 
@@ -39,7 +43,7 @@ means setup fails before ever reaching Bubble.
 |---|---|
 | `BUBBLE_API_TOKEN` | Yes |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | Only if delivering via Drive |
-| `SMTP_USERNAME` / `SMTP_PASSWORD` | Only if delivering via email (verified working — see Status) |
+| `SENDGRID_API_KEY` / `SENDGRID_FROM_EMAIL` | Only if delivering via email — see Emailing reports below |
 | `BUBBLE_ALLOW_PRODUCTION` + `BUBBLE_BASE_URL` | Only once ready for real (non-test) data — see [PRODUCTION_ACCESS_DISABLED.md](PRODUCTION_ACCESS_DISABLED.md) |
 
 **4. Create the routine**, pointed at this repo, scheduled for the 1st and
@@ -82,17 +86,21 @@ PDFs land in `reports/`.
 
 ### Environment prerequisites
 
-The cloud environment needs **both** of these on its allowed-domains list:
+The cloud environment needs **all three** of these on its allowed-domains list:
 
 | Domain | Why |
 |---|---|
 | `app.quietlist.com.au` | The Bubble Data API itself |
 | `cdn.playwright.dev` | Chromium download for `playwright install` |
+| `api.sendgrid.com` | Sending the report email |
 
 > Package registries (PyPI) are allowlisted by default, so `pip install`
 > works without configuration. The Playwright **browser binary** comes from a
 > separate CDN host — miss that one and setup fails before it ever reaches
-> Bubble.
+> Bubble. Email specifically needs its own domain because the routine's
+> sandbox only permits outbound HTTPS to allowlisted hosts, not arbitrary TCP
+> — SMTP (port 587) never gets through, however it's configured. See
+> "Emailing reports" below.
 
 ### Environment variables
 
@@ -141,10 +149,11 @@ and `BUBBLE_BASE_URL` are both also set)
 1. Checks whether today is the 1st or 15th via `compute_period.py`, exiting
    cleanly if not — so an off-cycle run can't produce a wrong-period report
 2. Computes the correct reporting window and its comparison period
-3. Generates one PDF per office in `offices.json`, into `reports/`
-4. **Uploads each PDF to Drive** (`drive_upload.py`) **and emails it**
-   (`email_report.py`), since the session's own filesystem does not persist
-   between runs
+3. Generates one PDF **and one .docx** per office in `offices.json` (every
+   office in the file, in one run — not just one), into `reports/`
+4. **Uploads every file to Drive** (`drive_upload.py`) **and emails all of
+   them in one message** (`email_report.py`), since the session's own
+   filesystem does not persist between runs
 
 A run that isn't on a reporting day logs
 `Not a reporting day (today is the N); skipping.` and exits 0. That's the
@@ -181,29 +190,45 @@ default, so a `--use-test-version` reconciliation pass doesn't push synthetic
 test PDFs into the client's real Drive folder). `run_scheduled_report.py`
 always uploads and does not use this flag.
 
-## Emailing PDFs
+## Emailing reports
 
-No third-party package and no paid service — `email_report.py` uses only
-Python's own standard-library `email`/`smtplib` modules. It reads each PDF
-and hands the bytes to those libraries, which handle MIME/base64 encoding
-internally as part of building the email; that's normal, invisible plumbing
-every email client does, not something that has to pass through an LLM's
-context to happen (the way, say, a chat-based Drive upload would).
+`email_report.py` sends via the **SendGrid** Web API (a plain HTTPS POST to
+`api.sendgrid.com/v3/mail/send`, using `requests` — no new dependency), one
+email per run with every generated file (all offices' PDFs and .docx files)
+attached together.
 
-**One-time setup — a Gmail App Password, not your real password:**
+**This replaced Gmail SMTP.** A Claude Code cloud routine's network sandbox
+only allows outbound HTTPS to allowlisted domains, not arbitrary TCP — SMTP's
+port 587 is unreachable from it no matter how it's configured (this was
+confirmed directly: the SMTP host resolved and connected fine over IPv4,
+authentication worked, and it still timed out at the port level from inside
+the routine). It worked from a local machine because a local machine has no
+such restriction. SendGrid's API needs only a domain on the allowlist
+(`api.sendgrid.com`, see above), so the exact same call works in both places.
 
-1. Turn on **2-Step Verification** on the sending Google account, if not
-   already on (required before App Passwords are available).
-2. Google Account → Security → **App Passwords** → create one.
-3. Set `SMTP_USERNAME` to that Gmail address and `SMTP_PASSWORD` to the
-   generated App Password.
-4. Set recipients: `report_email_recipients` (a list) in `config.json`, or
+**One-time setup:**
+
+1. Create a SendGrid account (sendgrid.com) — the free tier (100 emails/day)
+   is enough for this.
+2. Verify a sender under **Settings → Sender Authentication**: either
+   **Single Sender Verification** (fastest — verify one address by clicking
+   a link SendGrid emails to it) or full domain authentication (better
+   deliverability, needs a few DNS records at your registrar). Whichever
+   address ends up verified is what `SENDGRID_FROM_EMAIL` must be set to —
+   SendGrid rejects sends from an unverified address.
+3. Create an API key under **Settings → API Keys → Create API Key**.
+   Restricted Access with only **Mail Send** enabled is enough; Full Access
+   isn't needed.
+4. Set `SENDGRID_API_KEY` (the key — a secret) and `SENDGRID_FROM_EMAIL`
+   (the verified address) as environment variables / secrets — never in
+   `config.json`, never committed.
+5. Set recipients: `report_email_recipients` (a list) in `config.json`, or
    `REPORT_EMAIL_TO` (comma-separated) as a quick override without editing
    that file.
 
-Leaving `SMTP_USERNAME`/`SMTP_PASSWORD` unset is fine — `run_scheduled_report.py`
-logs a clear skip message rather than failing. Nothing here is needed for
-`--mock` or `--use-test-version` runs.
+Leaving `SENDGRID_API_KEY`/`SENDGRID_FROM_EMAIL` unset is fine —
+`run_scheduled_report.py` logs a clear skip message rather than failing.
+Nothing here is needed for `--mock` or `--use-test-version` runs.
 
 For a manual CLI run, email is opt-in via `--email-report` (with an optional
 `--email-to` override), off by default for the same reason `--upload-to-drive`
@@ -257,10 +282,11 @@ client-facing report changed accordingly.
 
 | File | Purpose |
 |---|---|
-| `generate_report.py` | Main pipeline + CLI: fetch → compute → template → PDF |
+| `generate_report.py` | Main pipeline + CLI: fetch → compute → template → PDF + .docx |
 | `run_scheduled_report.py` | Scheduled entry point (date guard + period window + delivery) |
-| `drive_upload.py` | Uploads generated PDFs to Drive via a service account |
-| `email_report.py` | Emails generated PDFs via SMTP (standard library only) |
+| `drive_upload.py` | Uploads generated report files to Drive via a service account |
+| `email_report.py` | Emails generated report files via the SendGrid API |
+| `docx_report.py` | Renders the .docx report alongside the PDF |
 | `compute_period.py` | 1st/15th guard and reporting-window arithmetic |
 | `commentary.py` | Generates the narrative bullets |
 | `template.html` | Jinja2 template, rendered to PDF via Playwright |
@@ -273,8 +299,15 @@ client-facing report changed accordingly.
 
 - ✅ Validated end-to-end against TEST/staging: counts reconcile exactly
   against the test data (3 listings, 10 matches; Apartments 1/3, Houses 2/7)
-- ✅ **Email delivery verified with a real send** — `email_report.py`
-  successfully delivered a generated PDF via Gmail SMTP
+- ✅ Both the PDF and .docx are generated per office and delivered together
+  (Drive + email); confirmed the office loop runs all of `offices.json` in
+  one pass, not just one office
+- ⚠️ **Email delivery moved from Gmail SMTP to the SendGrid API** (SMTP's
+  port 587 is unreachable from a Claude Code routine's network sandbox, so
+  it could never work there) — code-complete and skip/failure paths tested,
+  but no real SendGrid account has been set up yet to prove an actual send;
+  the previous SMTP-based send *was* verified working, but only locally,
+  which is exactly what the routine can't do
 - ⚠️ **Drive delivery is code-complete but not yet verified with a real
   upload** — every skip/failure path is tested, but no Google Cloud service
   account has been created yet to prove an actual upload
