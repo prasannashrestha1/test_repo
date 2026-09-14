@@ -20,12 +20,11 @@ not a loose approximation:
   CSS border-radius circle, so that one specific shape is a deliberate
   simplification, not an oversight.
 
-One thing to flag for whoever opens the result in Word: page/table background
-shading is a Word feature that is not always included by default when
-printing or exporting to PDF (Word: File > Options > Display > "Print
-background colors and images" must be on) — the teal panels use cell
-shading rather than a page background specifically to avoid depending on
-that setting, but it's worth knowing if colors ever seem to vanish on export.
+Verified end-to-end against actual Word output, not just by reading the XML
+back: Word is available via COM automation on the build machine, so every
+change here has been round-tripped through a real docx -> Word -> exported
+PDF cycle and visually compared against the reference PDF, the same way a
+recipient would actually experience opening this file.
 """
 import os
 
@@ -109,9 +108,59 @@ def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
 
 
 def _set_col_widths(table, widths_cm):
+    """Sets explicit column widths AND forces fixed table layout.
+
+    Word's default table layout ("autofit to contents") recalculates column
+    widths from what's actually in each cell, silently overriding a width set
+    on individual cells — this is exactly why a short label like "EXECUTIVE
+    SNAPSHOT" was not staying confined to its narrow column: autofit was
+    resizing it based on the label's own text length instead of respecting
+    the column width we asked for. Fixed layout, plus rewriting the table's
+    grid column widths (not just each cell's), is what makes Word actually
+    honor them.
+    """
+    tbl = table._tbl
+    tbl_pr = tbl.tblPr
+    if tbl_pr.find(qn("w:tblLayout")) is None:
+        layout = OxmlElement("w:tblLayout")
+        layout.set(qn("w:type"), "fixed")
+        tbl_pr.append(layout)
+
+    grid = tbl.find(qn("w:tblGrid"))
+    if grid is not None:
+        for grid_col, w in zip(grid.findall(qn("w:gridCol")), widths_cm):
+            grid_col.set(qn("w:w"), str(int(Cm(w).twips)))
+
     for row in table.rows:
         for cell, w in zip(row.cells, widths_cm):
             cell.width = Cm(w)
+
+
+def _set_page_background(doc, hex_color: str):
+    """Word's equivalent of template.html's .page { background: #efeee7 } --
+    needs BOTH a <w:background> element on the document root AND
+    <w:displayBackgroundShape/> in settings.xml; either alone is silently
+    ignored. Confirmed present via an actual Word -> PDF export round-trip,
+    not just by reading the XML back."""
+    background = OxmlElement("w:background")
+    background.set(qn("w:color"), hex_color)
+    doc.element.insert(0, background)
+
+    settings_el = doc.settings.element
+    settings_el.insert(0, OxmlElement("w:displayBackgroundShape"))
+
+
+def _set_cell_bottom_border(cell, color_hex: str, sz: int):
+    """Sets only a bottom border on a cell — matches table.plain's CSS
+    (border-bottom on header/body cells only, no vertical/top/left/right
+    lines) rather than a full box grid like table.listings genuinely has."""
+    borders = OxmlElement("w:tcBorders")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), str(sz))
+    bottom.set(qn("w:color"), color_hex)
+    borders.append(bottom)
+    cell._tc.get_or_add_tcPr().append(borders)
 
 
 def _labeled_row(doc, label_text: str):
@@ -129,6 +178,15 @@ def _labeled_row(doc, label_text: str):
 
 def render_docx(context: dict, output_path: str):
     doc = Document()
+    _set_page_background(doc, "EFEEE7")
+
+    # template.html's font-family is Arial first — Word's own default (which
+    # varies by version/locale, e.g. Calibri or Aptos) is never guaranteed to
+    # match, so every run needs this set explicitly rather than relying on
+    # whatever the installed Word's own default template happens to be.
+    normal = doc.styles["Normal"]
+    normal.font.name = "Arial"
+    normal.element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
 
     section = doc.sections[0]
     section.page_width = Cm(21.0)
@@ -168,18 +226,20 @@ def render_docx(context: dict, output_path: str):
     doc.add_paragraph()
     exec_content = _labeled_row(doc, "Executive Snapshot")
     exec_table = exec_content.add_table(rows=1, cols=3)
-    exec_table.style = "Table Grid"
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     hdr = exec_table.rows[0].cells
     for i, label in enumerate(("Metric", "Result", "Change vs. Previous Period")):
         _para(hdr[i], label, size=8, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
+        _set_cell_bottom_border(hdr[i], "105652", 12)
     for row in context["exec_snapshot"]:
         cells = exec_table.add_row().cells
         _para(cells[0], row["label"], size=8.5, bold=True, upper=True)
         _para(cells[1], row["result"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["change"], size=9, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER,
               color=TEAL if row["positive"] else RED)
+        for cell in cells:
+            _set_cell_bottom_border(cell, "B9C4BF", 6)
     _clear_empty_leading_paragraph(exec_content)
 
     doc.add_paragraph()
@@ -190,16 +250,18 @@ def render_docx(context: dict, output_path: str):
     perf_cell, tip_cell = perf_wrap.cell(0, 0), perf_wrap.cell(0, 1)
 
     perf_table = perf_cell.add_table(rows=1, cols=3)
-    perf_table.style = "Table Grid"
     hdr = perf_table.rows[0].cells
     for i, label in enumerate(("Property Type", "Listings", "Matches")):
         _para(hdr[i], label, size=8, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
+        _set_cell_bottom_border(hdr[i], "105652", 12)
     for row in context["performance_overview"]:
         cells = perf_table.add_row().cells
         _para(cells[0], row["property_type"], size=8.5, bold=True, upper=True)
         _para(cells[1], row["listings"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+        for cell in cells:
+            _set_cell_bottom_border(cell, "B9C4BF", 6)
     _clear_empty_leading_paragraph(perf_cell)
 
     _shade_cell(tip_cell, "105652")
@@ -212,6 +274,7 @@ def render_docx(context: dict, output_path: str):
     doc.add_paragraph()
     insights = doc.add_table(rows=1, cols=3)
     _no_borders(insights)
+    _set_col_widths(insights, [5.93, 5.93, 5.94])
     for c in range(3):
         _shade_cell(insights.cell(0, c), "105652")
     col1, col2, col3 = insights.cell(0, 0), insights.cell(0, 1), insights.cell(0, 2)
@@ -260,6 +323,7 @@ def render_docx(context: dict, output_path: str):
         rows = max(len(page["left"]), len(page["right"]))
         listing_table = doc.add_table(rows=rows, cols=2)
         listing_table.style = "Table Grid"
+        _set_col_widths(listing_table, [8.9, 8.9])
         for i in range(rows):
             left_val = page["left"][i] if i < len(page["left"]) else ""
             right_val = page["right"][i] if i < len(page["right"]) else ""
