@@ -6,17 +6,19 @@ numbers — this module only re-lays them out for Word.
 
 Word has no flexbox/CSS, so layout is reconstructed with tables (for
 side-by-side columns and shaded panels) rather than mirroring template.html's
-markup directly. Colors and section structure are matched as closely as
-Word's model allows, specifically so that if this .docx is later exported or
-printed to PDF from Word, the result still reads as the same report:
+markup directly. This is a deliberate structural match against template.html,
+not a loose approximation:
+- "Executive Snapshot" and "Performance Overview" sit in a narrow label
+  column to the LEFT of their tables (matching .row-label/.row-content in the
+  HTML — a sidebar layout, not a heading placed above the table)
 - teal (#105652) for section labels, positive figures, and panel backgrounds
 - red (#ff3131) for negative figures
 - bordered tables for the Executive Snapshot / Performance Overview /
   Matched Listings, matching the PDF's table.plain / table.listings
 - a shaded "panel" table standing in for the PDF's rounded Helpful Tip
   circle and the teal Key Insights box — Word has no easy equivalent to a
-  CSS border-radius circle, so this is a deliberate simplification, not an
-  oversight.
+  CSS border-radius circle, so that one specific shape is a deliberate
+  simplification, not an oversight.
 
 One thing to flag for whoever opens the result in Word: page/table background
 shading is a Word feature that is not always included by default when
@@ -62,6 +64,16 @@ def _no_borders(table):
     tbl_pr.append(borders)
 
 
+def _clear_empty_leading_paragraph(cell):
+    """A table cell always starts with exactly one empty paragraph (OOXML
+    requires at least one) — this only matters when content is added as a
+    nested table/object rather than through _para(), which already reuses
+    that paragraph itself. Call this after adding a nested table to a cell,
+    or the empty paragraph is left sitting above it as a stray blank line."""
+    if cell.paragraphs and not cell.paragraphs[0].runs:
+        cell.paragraphs[0]._p.getparent().remove(cell.paragraphs[0]._p)
+
+
 def _set_run(run, size=10, bold=False, italic=False, color=BLACK, upper=False):
     if upper:
         run.text = run.text.upper()
@@ -74,7 +86,21 @@ def _set_run(run, size=10, bold=False, italic=False, color=BLACK, upper=False):
 
 def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
           align=None, upper=False, style=None):
-    p = doc_or_cell.add_paragraph(style=style) if style else doc_or_cell.add_paragraph()
+    """Add a styled paragraph to a Document or a table cell.
+
+    A fresh Document has zero paragraphs; a fresh table cell always has
+    exactly one, empty one (OOXML requires it). Reusing that existing empty
+    paragraph for the first piece of content — rather than always calling
+    add_paragraph(), which appends a new one after it — avoids leaving a
+    stray blank line above every single cell's content. Once that paragraph
+    has a run in it, later calls correctly fall through to add_paragraph()
+    for subsequent lines in the same cell.
+    """
+    existing = getattr(doc_or_cell, "paragraphs", None)
+    if existing and len(existing) == 1 and not existing[0].runs and not style:
+        p = existing[0]
+    else:
+        p = doc_or_cell.add_paragraph(style=style) if style else doc_or_cell.add_paragraph()
     if align is not None:
         p.alignment = align
     if text:
@@ -86,6 +112,19 @@ def _set_col_widths(table, widths_cm):
     for row in table.rows:
         for cell, w in zip(row.cells, widths_cm):
             cell.width = Cm(w)
+
+
+def _labeled_row(doc, label_text: str):
+    """Matches template.html's .labeled-row: a narrow label column (.row-label,
+    30mm/~3cm in the CSS) beside a wider content column (.row-content) — a
+    sidebar layout, not a heading placed above the content. Returns the
+    content cell for the caller to build into."""
+    wrap = doc.add_table(rows=1, cols=2)
+    _no_borders(wrap)
+    _set_col_widths(wrap, [3.0, 14.8])
+    label_cell, content_cell = wrap.cell(0, 0), wrap.cell(0, 1)
+    _para(label_cell, label_text, size=9, bold=True, color=TEAL, upper=True)
+    return content_cell
 
 
 def render_docx(context: dict, output_path: str):
@@ -104,8 +143,8 @@ def render_docx(context: dict, output_path: str):
     _no_borders(footer_table)
     _set_col_widths(footer_table, [12.0, 5.8])
     _para(footer_table.cell(0, 0), context["footer_contact"], size=7)
-    right_cell = footer_table.cell(0, 1)
-    _para(right_cell, context["logo_text"], size=9, bold=True, align=WD_ALIGN_PARAGRAPH.RIGHT)
+    _para(footer_table.cell(0, 1), context["logo_text"], size=9, bold=True,
+          align=WD_ALIGN_PARAGRAPH.RIGHT)
 
     # ================= PAGE 1: SUMMARY =================
 
@@ -113,24 +152,22 @@ def render_docx(context: dict, output_path: str):
     _no_borders(header_table)
     _set_col_widths(header_table, [11.0, 6.8])
     left = header_table.cell(0, 0)
-    _para(left, context["office_name"], size=20, bold=True, upper=True)
+    _para(left, context["office_name"], size=24, bold=True, upper=True)
     _para(left, "Quiet List Exchange Activity Report", size=11, bold=True)
     right = header_table.cell(0, 1)
-    right.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     for label, value in (
         (context["reporting_period_label"], context["office_name"]),
         ("REPORTING PERIOD", context["period_range_label"]),
         ("PREPARED FOR", context["prepared_for"]),
         ("DATE", context["report_date_label"]),
     ):
-        p = right.add_paragraph()
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p = _para(right, align=WD_ALIGN_PARAGRAPH.RIGHT)
         _set_run(p.add_run(f"{label}: "), size=8, color=TEAL)
         _set_run(p.add_run(value), size=8, bold=True, color=BLACK)
 
     doc.add_paragraph()
-    _para(doc, "Executive Snapshot", size=9, bold=True, color=TEAL, upper=True)
-    exec_table = doc.add_table(rows=1, cols=3)
+    exec_content = _labeled_row(doc, "Executive Snapshot")
+    exec_table = exec_content.add_table(rows=1, cols=3)
     exec_table.style = "Table Grid"
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     hdr = exec_table.rows[0].cells
@@ -143,12 +180,13 @@ def render_docx(context: dict, output_path: str):
         _para(cells[1], row["result"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["change"], size=9, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER,
               color=TEAL if row["positive"] else RED)
+    _clear_empty_leading_paragraph(exec_content)
 
     doc.add_paragraph()
-    _para(doc, "Performance Overview", size=9, bold=True, color=TEAL, upper=True)
-    perf_wrap = doc.add_table(rows=1, cols=2)
+    perf_content = _labeled_row(doc, "Performance Overview")
+    perf_wrap = perf_content.add_table(rows=1, cols=2)
     _no_borders(perf_wrap)
-    _set_col_widths(perf_wrap, [12.0, 5.8])
+    _set_col_widths(perf_wrap, [9.0, 5.8])
     perf_cell, tip_cell = perf_wrap.cell(0, 0), perf_wrap.cell(0, 1)
 
     perf_table = perf_cell.add_table(rows=1, cols=3)
@@ -162,15 +200,14 @@ def render_docx(context: dict, output_path: str):
         _para(cells[0], row["property_type"], size=8.5, bold=True, upper=True)
         _para(cells[1], row["listings"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
-    # remove the auto-added empty first paragraph docx puts before a cell table
-    if perf_cell.paragraphs and not perf_cell.paragraphs[0].runs:
-        perf_cell.paragraphs[0]._p.getparent().remove(perf_cell.paragraphs[0]._p)
+    _clear_empty_leading_paragraph(perf_cell)
 
     _shade_cell(tip_cell, "105652")
     tip_cell.vertical_alignment = 1  # center
     _para(tip_cell, "Helpful Tip", size=8, bold=True, color=WHITE, upper=True,
           align=WD_ALIGN_PARAGRAPH.CENTER)
     _para(tip_cell, context["helpful_tip"], size=7, color=WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+    _clear_empty_leading_paragraph(perf_content)
 
     doc.add_paragraph()
     insights = doc.add_table(rows=1, cols=3)
