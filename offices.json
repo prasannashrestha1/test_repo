@@ -5,5 +5,65 @@
     "malcolm_id": "1",
     "prepared_for": "Will Gosse",
     "helpful_tip": "Buyer's Agents must complete AML checks before a brief can enter the exchange."
+  },
+  {
+    "office_id": "3",
+    "office_name": "Sydney Sotheby's International Realty",
+    "malcolm_id": "3"
+  },
+  {
+    "office_id": "5",
+    "office_name": "BresicWhitney",
+    "malcolm_id": "5"
+  },
+  {
+    "office_id": "6",
+    "office_name": "First National Bowral",
+    "malcolm_id": "6"
+  },
+  {
+    "office_id": "7",
+    "office_name": "LJ Hooker Palm Beach",
+    "malcolm_id": "7"
+  },
+  {
+    "office_id": "8",
+    "office_name": "LJ Hooker Avalon Beach",
+    "malcolm_id": "8"
+  },
+  {
+    "office_id": "9",
+    "office_name": "Bradfield Badgerfox",
+    "malcolm_id": "9"
+  },
+  {
+    "office_id": "10",
+    "office_name": "McGrath Coogee",
+    "malcolm_id": "10"
+  },
+  {
+    "office_id": "11",
+    "office_name": "McGrath Maroubra",
+    "malcolm_id": "11"
+  },
+  {
+    "office_id": "12",
+    "office_name": "McGrath Pittwater - Avalon",
+    "malcolm_id": "12"
+  },
+  {
+    "office_id": "13",
+    "office_name": "McGrath Mona Vale",
+    "malcolm_id": "13"
+  },
+  {
+    "office_id": "14",
+    "office_name": "McGrath Collaroy | Dee Why",
+    "malcolm_id": "14"
+  },
+  {
+    "office_id": "15",
+    "office_name": "NG Farah",
+    "malcolm_id": "15"
   }
 ]

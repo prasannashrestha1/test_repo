@@ -86,6 +86,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
@@ -568,6 +569,19 @@ async def render_pdf(context: dict, output_path: str):
 # Per-office pipeline with error tolerance
 # --------------------------------------------------------------------------
 
+_FILENAME_UNSAFE_RE = re.compile(r'[<>:"/\\|?*]')
+
+
+def _safe_filename(name: str) -> str:
+    """Turn an office name into something safe to use in a file path on any
+    OS. Spaces become underscores; Windows' reserved filename characters
+    (< > : " / \\ | ? *) are stripped outright rather than just spaces --
+    an office name containing one of these (e.g. "McGrath Collaroy | Dee
+    Why") previously crashed report generation on Windows with
+    "[Errno 22] Invalid argument", since only spaces were being replaced."""
+    return _FILENAME_UNSAFE_RE.sub("", name).replace(" ", "_")
+
+
 def generate_report_for_office(office: dict, period: dict, config: dict,
                                 client: BubbleClient = None, mock: bool = False) -> dict:
     """Returns {"pdf_path": ..., "docx_path": ...}. Raises on failure — caller decides tolerance."""
@@ -600,7 +614,7 @@ def generate_report_for_office(office: dict, period: dict, config: dict,
     )
 
     os.makedirs(config["output_dir"], exist_ok=True)
-    safe_name = office["office_name"].replace(" ", "_")
+    safe_name = _safe_filename(office["office_name"])
     pdf_path = os.path.join(config["output_dir"], f"{safe_name}_{period['file_suffix']}.pdf")
     docx_path = os.path.join(config["output_dir"], f"{safe_name}_{period['file_suffix']}.docx")
 

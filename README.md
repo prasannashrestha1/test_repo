@@ -338,4 +338,7 @@ client-facing report changed accordingly.
 - ⚠️ **Production has never been exercised**
 - ⚠️ `CURRENT` is the only `malcolm_listing_state` value observed — filtering
   against other states is unproven
-- ⚠️ `offices.json` has 1 of 8 offices; the rest need their IDs confirmed
+- ⚠️ `offices.json` now has 13 offices with confirmed IDs; only the first
+  (Sydney Sooth) has a `prepared_for` recipient name and custom
+  `helpful_tip` set — the rest fall back to an empty "prepared for" line
+  and the default compliance tip until those are provided per office
