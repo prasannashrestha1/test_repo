@@ -44,10 +44,10 @@ STATUS / OPEN ITEMS (see property_matches_schema_api_spec_v0.5.md):
     — every run uses test/staging until BUBBLE_ALLOW_PRODUCTION is explicitly
     set, at which point BUBBLE_BASE_URL/config.json's "bubble_base_url" is
     used instead.
-  - The mapping from raw property_types/dwelling values to the coarse
-    "Apartments" vs "Houses" split in Performance Overview is a guess
-    (PROPERTY_CATEGORY_MAP below) — this WILL need tuning once real data
-    is seen; it's config-driven for exactly that reason.
+  - Performance Overview shows one row per raw property_type value that
+    actually has a match or current listing this period (Bubble's
+    property_type option set has ~19 possible values), rather than a fixed
+    set of categories — a type with zero activity simply doesn't get a row.
   - Budget-range bucket width defaults to $200,000 — tune during the
     single-office reconciliation test if it doesn't land on Will's numbers.
     Note: price_min/price_max now come from the buyer's BRIEF budget range
@@ -107,22 +107,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # --env-file can point at a different file, and overrides this.
 DEFAULT_ENV_FILE = os.path.join(SCRIPT_DIR, ".env")
 load_dotenv(DEFAULT_ENV_FILE)
-
-# Coarse category mapping for the Performance Overview table. Keys are
-# lower-cased raw property_types values as they might appear in Bubble;
-# anything unmatched falls into "Other" rather than being silently dropped,
-# so mismatches are visible in testing instead of hidden.
-PROPERTY_CATEGORY_MAP = {
-    "apartment": "Apartments",
-    "unit": "Apartments",
-    "flat": "Apartments",
-    "house": "Houses",
-    "semi": "Houses",
-    "terrace": "Houses",
-    "townhouse": "Houses",
-    "duplex": "Houses",
-    "villa": "Houses",
-}
 
 # Maps our canonical field names (used by every compute_* function below) to
 # the REAL Bubble field names on the property_matches object. ALL of these are
@@ -292,13 +276,6 @@ def pct_change(current, previous):
     return (current - previous) / previous * 100
 
 
-def categorize_property_type(raw_value: str) -> str:
-    if not raw_value:
-        return "Other"
-    key = str(raw_value).strip().lower()
-    return PROPERTY_CATEGORY_MAP.get(key, "Other")
-
-
 def first_property_type(match: dict) -> str:
     """property_types may be a single string or a list — normalize to one representative value."""
     val = match.get("property_types")
@@ -362,18 +339,33 @@ def compute_performance_overview(matches_current, current_status_value="Current"
         lid = m.get("listing_id")
         if lid and lid not in current_listings and is_current_listing_status(m.get("listing_status"), current_status_value):
             current_listings[lid] = m
-    listings_by_cat = Counter(categorize_property_type(first_property_type(l)) for l in current_listings.values())
-    matches_by_cat = Counter(categorize_property_type(first_property_type(m)) for m in matches_current)
+    listings_by_type = Counter(
+        first_property_type(l) for l in current_listings.values() if first_property_type(l)
+    )
+    matches_by_type = Counter(
+        first_property_type(m) for m in matches_current if first_property_type(m)
+    )
 
-    categories = ["Apartments", "Houses"]
-    rows = []
-    for cat in categories:
-        rows.append({
-            "property_type": cat,
-            "listings": str(listings_by_cat.get(cat, 0)),
-            "matches": str(matches_by_cat.get(cat, 0)),
-        })
-    return rows
+    # One row per raw property_type value that actually has a match or
+    # current listing this period -- not a fixed Apartments/Houses pair.
+    # Bubble's property_type option set has ~19 possible values (Commercial,
+    # Land, Retirement, Studio, Warehouse, ...); most won't appear in any
+    # given period, so a type with zero activity simply gets no row rather
+    # than showing up as an empty 0/0 line. Sorted by match count so the
+    # table reads as a ranking.
+    property_types = sorted(
+        set(listings_by_type) | set(matches_by_type),
+        key=lambda t: matches_by_type.get(t, 0),
+        reverse=True,
+    )
+    return [
+        {
+            "property_type": t,
+            "listings": str(listings_by_type.get(t, 0)),
+            "matches": str(matches_by_type.get(t, 0)),
+        }
+        for t in property_types
+    ]
 
 
 def compute_top_suburbs(matches_current, top_n=5):

@@ -79,7 +79,13 @@ def bullet_featured_listing(featured_address, featured_count,
 
 
 def bullet_property_type_split(performance_overview) -> str:
-    # performance_overview: [{property_type, listings, matches}, ...] — expects exactly 2 rows
+    # performance_overview: [{property_type, listings, matches}, ...] -- one row
+    # per property type actually active this period, so this can be any
+    # length (1 if only one type had matches, several if many did), not
+    # always exactly 2.
+    if not performance_overview:
+        return "No matches were recorded against any property type this period."
+
     enriched = []
     for row in performance_overview:
         listings = float(row["listings"])
@@ -87,12 +93,23 @@ def bullet_property_type_split(performance_overview) -> str:
         ratio = matches / listings if listings else 0
         enriched.append({**row, "ratio": ratio})
     enriched.sort(key=lambda r: r["ratio"], reverse=True)
-    a, b = enriched[0], enriched[1]
+    a = enriched[0]
+
+    if len(enriched) == 1:
+        return (
+            f"{a['property_type']} was the only active property type this period, "
+            f"generating {a['matches']} matches from {a['listings']} listings."
+        )
+
+    b = enriched[1]
+    others_clause = ""
+    if len(enriched) > 2:
+        others_clause = f", with {len(enriched) - 2} other property type(s) also active"
 
     return (
         f"{a['property_type']} led with {a['matches']} matches from {a['listings']} listings "
-        f"vs {b['matches']} from {b['listings']} {b['property_type'].lower()} — strongest "
-        f"buyer-brief relevance this period."
+        f"vs {b['matches']} from {b['listings']} {b['property_type'].lower()}{others_clause} — "
+        f"strongest buyer-brief relevance this period."
     )
 
 
