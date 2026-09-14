@@ -96,6 +96,7 @@ from jinja2 import Environment, FileSystemLoader
 from playwright.async_api import async_playwright
 
 from commentary import build_commentary
+from docx_report import render_docx
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -558,8 +559,8 @@ async def render_pdf(context: dict, output_path: str):
 # --------------------------------------------------------------------------
 
 def generate_report_for_office(office: dict, period: dict, config: dict,
-                                client: BubbleClient = None, mock: bool = False) -> str:
-    """Returns the output PDF path. Raises on failure — caller decides tolerance."""
+                                client: BubbleClient = None, mock: bool = False) -> dict:
+    """Returns {"pdf_path": ..., "docx_path": ...}. Raises on failure — caller decides tolerance."""
     if mock:
         from mock_data import get_mock_data
         matches_current, matches_previous = get_mock_data(office["office_id"])
@@ -588,9 +589,16 @@ def generate_report_for_office(office: dict, period: dict, config: dict,
 
     os.makedirs(config["output_dir"], exist_ok=True)
     safe_name = office["office_name"].replace(" ", "_")
-    output_path = os.path.join(config["output_dir"], f"{safe_name}_{period['file_suffix']}.pdf")
-    asyncio.run(render_pdf(context, output_path))
-    return output_path
+    pdf_path = os.path.join(config["output_dir"], f"{safe_name}_{period['file_suffix']}.pdf")
+    docx_path = os.path.join(config["output_dir"], f"{safe_name}_{period['file_suffix']}.docx")
+
+    # PDF stays exactly as before — kept for future use, not being replaced.
+    asyncio.run(render_pdf(context, pdf_path))
+    # Word version, generated alongside from the same context dict, so the
+    # two formats can never disagree on the numbers — only how they're laid out.
+    render_docx(context, docx_path)
+
+    return {"pdf_path": pdf_path, "docx_path": docx_path}
 
 
 def _is_truthy_env(name: str) -> bool:
@@ -664,8 +672,14 @@ def generate_all_reports(offices: list, period: dict, config: dict, mock: bool =
     errors = []
     for office in offices:
         try:
-            path = generate_report_for_office(office, period, config, client=client, mock=mock)
-            successes.append({"office_name": office["office_name"], "path": path})
+            paths = generate_report_for_office(office, period, config, client=client, mock=mock)
+            # "path" stays the PDF path for backward compatibility — drive_upload.py
+            # and email_report.py already read successes[i]["path"] for delivery.
+            successes.append({
+                "office_name": office["office_name"],
+                "path": paths["pdf_path"],
+                "docx_path": paths["docx_path"],
+            })
         except Exception as e:  # noqa: BLE001 — intentional: one office must not stop the batch
             errors.append({"office_name": office["office_name"], "error": str(e)})
 
