@@ -87,16 +87,22 @@ def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
           align=None, upper=False, style=None):
     """Add a styled paragraph to a Document or a table cell.
 
-    A fresh Document has zero paragraphs; a fresh table cell always has
-    exactly one, empty one (OOXML requires it). Reusing that existing empty
-    paragraph for the first piece of content — rather than always calling
-    add_paragraph(), which appends a new one after it — avoids leaving a
-    stray blank line above every single cell's content. Once that paragraph
-    has a run in it, later calls correctly fall through to add_paragraph()
-    for subsequent lines in the same cell.
+    A fresh table cell always has exactly one, empty paragraph already
+    (OOXML requires it) — reusing it for the first piece of content, rather
+    than always calling add_paragraph() and leaving that original one as a
+    stray blank line, is correct there. But this reuse must be scoped to
+    cells specifically (detected via the _tc attribute only cells have):
+    applying the same trick to the top-level Document caused a real bug —
+    once one _para(doc, ...) call left its paragraph empty, every later
+    _para(doc, ...) call kept re-targeting that same original paragraph
+    instead of appending a new one at the current end, silently detaching
+    every table and paragraph added afterward from its intended position in
+    the document (they'd still get created, just all shifted to the wrong
+    place). A Document's paragraphs must always be freshly appended.
     """
-    existing = getattr(doc_or_cell, "paragraphs", None)
-    if existing and len(existing) == 1 and not existing[0].runs and not style:
+    is_cell = hasattr(doc_or_cell, "_tc")
+    existing = doc_or_cell.paragraphs if is_cell else None
+    if is_cell and existing and len(existing) == 1 and not existing[0].runs and not style:
         p = existing[0]
     else:
         p = doc_or_cell.add_paragraph(style=style) if style else doc_or_cell.add_paragraph()
@@ -187,6 +193,13 @@ def render_docx(context: dict, output_path: str):
     normal = doc.styles["Normal"]
     normal.font.name = "Arial"
     normal.element.rPr.rFonts.set(qn("w:eastAsia"), "Arial")
+    # Word's own default template usually adds ~8-10pt space after every
+    # paragraph — template.html's margins are much tighter (4-6mm gaps
+    # between sections), and that mismatch compounded across a whole page's
+    # worth of paragraphs was pushing content onto an extra page. Spacer
+    # paragraphs below now control gaps explicitly via font size instead.
+    normal.paragraph_format.space_after = Pt(0)
+    normal.paragraph_format.space_before = Pt(0)
 
     section = doc.sections[0]
     section.page_width = Cm(21.0)
@@ -200,8 +213,8 @@ def render_docx(context: dict, output_path: str):
     footer_table = section.footer.add_table(rows=1, cols=2, width=Cm(17.8))
     _no_borders(footer_table)
     _set_col_widths(footer_table, [12.0, 5.8])
-    _para(footer_table.cell(0, 0), context["footer_contact"], size=7)
-    _para(footer_table.cell(0, 1), context["logo_text"], size=9, bold=True,
+    _para(footer_table.cell(0, 0), context["footer_contact"], size=7.5)
+    _para(footer_table.cell(0, 1), context["logo_text"], size=10, bold=True,
           align=WD_ALIGN_PARAGRAPH.RIGHT)
 
     # ================= PAGE 1: SUMMARY =================
@@ -211,7 +224,7 @@ def render_docx(context: dict, output_path: str):
     _set_col_widths(header_table, [11.0, 6.8])
     left = header_table.cell(0, 0)
     _para(left, context["office_name"], size=24, bold=True, upper=True)
-    _para(left, "Quiet List Exchange Activity Report", size=11, bold=True)
+    _para(left, "Quiet List Exchange Activity Report", size=11, bold=True, upper=True)
     right = header_table.cell(0, 1)
     for label, value in (
         (context["reporting_period_label"], context["office_name"]),
@@ -220,10 +233,10 @@ def render_docx(context: dict, output_path: str):
         ("DATE", context["report_date_label"]),
     ):
         p = _para(right, align=WD_ALIGN_PARAGRAPH.RIGHT)
-        _set_run(p.add_run(f"{label}: "), size=8, color=TEAL)
-        _set_run(p.add_run(value), size=8, bold=True, color=BLACK)
+        _set_run(p.add_run(f"{label}: "), size=9, color=TEAL)
+        _set_run(p.add_run(value), size=9, bold=True, color=BLACK)
 
-    doc.add_paragraph()
+    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
     exec_content = _labeled_row(doc, "Executive Snapshot")
     exec_table = exec_content.add_table(rows=1, cols=3)
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -242,7 +255,7 @@ def render_docx(context: dict, output_path: str):
             _set_cell_bottom_border(cell, "B9C4BF", 6)
     _clear_empty_leading_paragraph(exec_content)
 
-    doc.add_paragraph()
+    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
     perf_content = _labeled_row(doc, "Performance Overview")
     perf_wrap = perf_content.add_table(rows=1, cols=2)
     _no_borders(perf_wrap)
@@ -266,12 +279,12 @@ def render_docx(context: dict, output_path: str):
 
     _shade_cell(tip_cell, "105652")
     tip_cell.vertical_alignment = 1  # center
-    _para(tip_cell, "Helpful Tip", size=8, bold=True, color=WHITE, upper=True,
+    _para(tip_cell, "Helpful Tip", size=7.5, bold=True, color=WHITE, upper=True,
           align=WD_ALIGN_PARAGRAPH.CENTER)
-    _para(tip_cell, context["helpful_tip"], size=7, color=WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+    _para(tip_cell, context["helpful_tip"], size=6.5, color=WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
     _clear_empty_leading_paragraph(perf_content)
 
-    doc.add_paragraph()
+    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
     insights = doc.add_table(rows=1, cols=3)
     _no_borders(insights)
     _set_col_widths(insights, [5.93, 5.93, 5.94])
@@ -302,7 +315,7 @@ def render_docx(context: dict, output_path: str):
     for i, name in enumerate(context["top_operatives"], 1):
         _para(col3, f"{i}. {name}", size=8, color=WHITE, align=WD_ALIGN_PARAGRAPH.RIGHT)
 
-    doc.add_paragraph()
+    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
     _para(doc, "Commentary:", size=9, bold=True, color=TEAL, upper=True)
     for bullet in context["commentary"]:
         _para(doc, bullet, size=8.5, style="List Bullet")
@@ -311,9 +324,9 @@ def render_docx(context: dict, output_path: str):
     for page in context["listing_pages"]:
         doc.add_page_break()
         heading = doc.add_paragraph()
-        _set_run(heading.add_run(f"{context['office_name']} "), size=18, bold=True, upper=True)
-        _set_run(heading.add_run("x"), size=18, bold=True, italic=True, color=TEAL)
-        _set_run(heading.add_run(" Quiet List."), size=18, bold=True, upper=True)
+        _set_run(heading.add_run(f"{context['office_name']} "), size=20, bold=True, upper=True)
+        _set_run(heading.add_run("x"), size=20, bold=True, italic=True, color=TEAL, upper=True)
+        _set_run(heading.add_run(" Quiet List."), size=20, bold=True, upper=True)
 
         p = doc.add_paragraph()
         _set_run(p.add_run("Matched Listings:"), size=9, bold=True, color=TEAL, upper=True)
