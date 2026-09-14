@@ -155,6 +155,8 @@ MATCH_FIELD_MAP = {
 PROPERTY_FIELD_MAP = {
     "listing_id": "listing_id_text",
     "malcolm_listing_state": "malcolm_listing_state_option_os_malcolm_listing_state",
+    "status": "status_option_os_property_status",
+    "backend_price": "backend_price_number",
 }
 
 
@@ -245,18 +247,34 @@ def fetch_matches(client: BubbleClient, object_name: str, office_id: str,
 
 
 def fetch_property_status(client: BubbleClient, object_name: str, listing_ids: list,
-                           field_map: dict = PROPERTY_FIELD_MAP) -> dict:
+                           field_map: dict = PROPERTY_FIELD_MAP,
+                           required_status: str = "Available",
+                           min_backend_price: float = 50_000) -> dict:
     """One GET against the `property` object for every listing_id appearing in
     this office's matches (Bubble's "in" constraint), returning
     {listing_id: malcolm_listing_state}. This is the confirmed replacement for
     the old separate Listings-snapshot fetch — status is now looked up per
-    match rather than pulled from an independent inventory snapshot."""
+    match rather than pulled from an independent inventory snapshot.
+
+    Also constrains the fetch itself to properties with status "Available"
+    and a backend_price_number above min_backend_price -- only properties
+    meeting both belong in the matching pool at all. A matched listing whose
+    property fails either constraint (e.g. sold, or a placeholder/test
+    listing priced under $50k) simply won't come back here, so it's absent
+    from status_lookup and attach_listing_status leaves its listing_status
+    as None -- is_current_listing_status already treats that as "not
+    current", so no separate exclusion logic is needed downstream.
+    """
     unique_ids = sorted({lid for lid in listing_ids if lid})
     if not unique_ids:
         return {}
     listing_id_key = field_map["listing_id"]
     state_key = field_map["malcolm_listing_state"]
-    constraints = [{"key": listing_id_key, "constraint_type": "in", "value": unique_ids}]
+    constraints = [
+        {"key": listing_id_key, "constraint_type": "in", "value": unique_ids},
+        {"key": field_map["status"], "constraint_type": "equals", "value": required_status},
+        {"key": field_map["backend_price"], "constraint_type": "greater than", "value": min_backend_price},
+    ]
     raw_rows = client.fetch_all(object_name, constraints)
     return {row.get(listing_id_key): row.get(state_key) for row in raw_rows}
 
@@ -569,7 +587,9 @@ def generate_report_for_office(office: dict, period: dict, config: dict,
         property_field_map = config.get("property_field_map", PROPERTY_FIELD_MAP)
         all_listing_ids = [m.get("listing_id") for m in matches_current + matches_previous]
         status_lookup = fetch_property_status(
-            client, config["property_object"], all_listing_ids, property_field_map
+            client, config["property_object"], all_listing_ids, property_field_map,
+            required_status=config.get("property_required_status", "Available"),
+            min_backend_price=config.get("property_min_backend_price", 50_000),
         )
         attach_listing_status(matches_current, status_lookup)
         attach_listing_status(matches_previous, status_lookup)

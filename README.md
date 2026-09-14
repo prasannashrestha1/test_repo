@@ -278,13 +278,20 @@ report comes from here alone. Filtered by `office_id_text` and
 **`property`** — the listing records. Joined per match on
 `property_listing_id_text` → `listing_id_text`, purely to read
 `malcolm_listing_state_option_os_malcolm_listing_state` (the current listing
-state, e.g. `CURRENT`).
+state, e.g. `CURRENT`). The fetch itself is also constrained to properties
+with `status_option_os_property_status` = `Available` and
+`backend_price_number` > `property_min_backend_price` (config.json, default
+50000) — a matched listing whose property fails either isn't part of the
+matching pool at all, so it's excluded from "Total Current Status Listings"
+and the Performance Overview "Listings" column the same way a listing with no
+match at all would be (see `fetch_property_status` in generate_report.py).
 
 ### An important caveat about "Total Current Status Listings"
 
 That metric — and the Performance Overview "Listings" column — count
 **distinct current-status listings among those that were matched** in the
-period. They are *not* total office inventory.
+period, and whose property record is `Available` and priced above the
+configured floor. They are *not* total office inventory.
 
 A listing that received zero matches never appears in `Property_Matches` at
 all, so it cannot be counted. Total inventory independent of match activity
