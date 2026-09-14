@@ -15,18 +15,25 @@ not a loose approximation:
 - red (#ff3131) for negative figures
 - bordered tables for the Executive Snapshot / Performance Overview /
   Matched Listings, matching the PDF's table.plain / table.listings
-- a shaded "panel" table standing in for the PDF's rounded Helpful Tip
-  circle and the teal Key Insights box — Word has no easy equivalent to a
-  CSS border-radius circle, so that one specific shape is a deliberate
-  simplification, not an oversight.
+- the teal Key Insights box as a shaded borderless table
+- the Helpful Tip as a genuine circular shape (DrawingML ellipse with a
+  text box inside), matching the PDF's border-radius: 50% .tip-circle —
+  python-docx has no shape-drawing API, so this is hand-built OOXML parsed
+  with lxml, not something python-docx's own OxmlElement() helper can
+  construct (it doesn't know the DrawingML/WordprocessingShape namespaces).
 
 Verified end-to-end against actual Word output, not just by reading the XML
 back: Word is available via COM automation on the build machine, so every
 change here has been round-tripped through a real docx -> Word -> exported
 PDF cycle and visually compared against the reference PDF, the same way a
-recipient would actually experience opening this file.
+recipient would actually experience opening this file. The circle shape
+specifically needed this — an early version used <a:noAutofit/> in the text
+box, which looked fine with a short test string but let the real (much
+longer) tip text run on as one line past the circle's edge entirely, only
+caught by testing with the actual production text rather than a placeholder.
 """
 import os
+from xml.sax.saxutils import escape as _xml_escape
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -34,6 +41,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.shared import Cm, Mm, Pt, RGBColor
+from lxml import etree
 
 TEAL = RGBColor(0x10, 0x56, 0x52)
 RED = RGBColor(0xFF, 0x31, 0x31)
@@ -138,7 +146,7 @@ def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
     return p
 
 
-def _spacer(doc, pt=6):
+def _spacer(doc, pt=3):
     """A small gap between sections, matching template.html's tight
     margins (4-6mm) — NOT achieved via a run's font size, because an empty
     paragraph (no text, so no run at all) doesn't hold one: its height comes
@@ -207,6 +215,72 @@ def _set_cell_bottom_border(cell, color_hex: str, sz: int):
     bottom.set(qn("w:color"), color_hex)
     borders.append(bottom)
     cell._tc.get_or_add_tcPr().append(borders)
+
+
+def _add_circle_shape(paragraph, diameter_mm, fill_hex, title, body_text,
+                       title_size_pt=7, body_size_pt=6):
+    """Inserts a true circular shape (DrawingML ellipse) with centered text
+    into a paragraph, matching template.html's .tip-circle (border-radius:
+    50%). python-docx has no shape-drawing API at all, so this is hand-built
+    OOXML parsed with lxml — the DrawingML/WordprocessingShape namespaces
+    involved aren't ones python-docx's own OxmlElement() helper knows.
+
+    <a:spAutoFit/> in bodyPr is the load-bearing setting here. The more
+    "obvious"-looking <a:noAutofit/> also disables wrapping text to the
+    shape's own width — the real (long) tip text just ran on as one line
+    past the circle's edge with it, only caught by testing against the
+    actual production text rather than a short placeholder. spAutoFit
+    correctly wraps and centers the full text inside the fixed-size circle.
+    """
+    emu = int(Mm(diameter_mm).emu)
+    title_sz = int(title_size_pt * 2)  # w:sz is in half-points
+    body_sz = int(body_size_pt * 2)
+    xml = f"""<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:drawing xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">
+    <wp:inline distT="0" distB="0" distL="0" distR="0">
+      <wp:extent cx="{emu}" cy="{emu}"/>
+      <wp:effectExtent l="0" t="0" r="0" b="0"/>
+      <wp:docPr id="1" name="TipCircle"/>
+      <wp:cNvGraphicFramePr/>
+      <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+        <a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+          <wps:wsp xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">
+            <wps:cNvSpPr/>
+            <wps:spPr>
+              <a:xfrm><a:off x="0" y="0"/><a:ext cx="{emu}" cy="{emu}"/></a:xfrm>
+              <a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom>
+              <a:solidFill><a:srgbClr val="{fill_hex}"/></a:solidFill>
+              <a:ln><a:noFill/></a:ln>
+            </wps:spPr>
+            <wps:txbx>
+              <w:txbxContent>
+                <w:p>
+                  <w:pPr><w:jc w:val="center"/></w:pPr>
+                  <w:r>
+                    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:color w:val="FFFFFF"/><w:sz w:val="{title_sz}"/></w:rPr>
+                    <w:t>{_xml_escape(title)}</w:t>
+                  </w:r>
+                </w:p>
+                <w:p>
+                  <w:pPr><w:jc w:val="center"/></w:pPr>
+                  <w:r>
+                    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:color w:val="FFFFFF"/><w:sz w:val="{body_sz}"/></w:rPr>
+                    <w:t>{_xml_escape(body_text)}</w:t>
+                  </w:r>
+                </w:p>
+              </w:txbxContent>
+            </wps:txbx>
+            <wps:bodyPr wrap="square" lIns="91440" tIns="91440" rIns="91440" bIns="91440" anchor="ctr">
+              <a:spAutoFit/>
+            </wps:bodyPr>
+          </wps:wsp>
+        </a:graphicData>
+      </a:graphic>
+    </wp:inline>
+  </w:drawing>
+</w:r>"""
+    r_element = etree.fromstring(xml.encode("utf-8"))
+    paragraph._p.append(r_element)
 
 
 def _labeled_row(doc, label_text: str):
@@ -279,7 +353,7 @@ def render_docx(context: dict, output_path: str):
         _set_run(p.add_run(f"{label}: "), size=9, color=TEAL)
         _set_run(p.add_run(value), size=9, bold=True, color=BLACK)
 
-    _spacer(doc, pt=6)
+    _spacer(doc, pt=3)
     exec_content = _labeled_row(doc, "Executive Snapshot")
     exec_table = exec_content.add_table(rows=1, cols=3)
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -300,7 +374,7 @@ def render_docx(context: dict, output_path: str):
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
     _clear_empty_leading_paragraph(exec_content)
 
-    _spacer(doc, pt=6)
+    _spacer(doc, pt=3)
     perf_content = _labeled_row(doc, "Performance Overview")
     perf_wrap = perf_content.add_table(rows=1, cols=2)
     _no_borders(perf_wrap)
@@ -324,15 +398,13 @@ def render_docx(context: dict, output_path: str):
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
     _clear_empty_leading_paragraph(perf_cell)
 
-    _shade_cell(tip_cell, "105652")
     tip_cell.vertical_alignment = 1  # center
-    _set_cell_margins(tip_cell, top_mm=3, bottom_mm=3, left_mm=3, right_mm=3)
-    _para(tip_cell, "Helpful Tip", size=7.5, bold=True, color=WHITE, upper=True,
-          align=WD_ALIGN_PARAGRAPH.CENTER)
-    _para(tip_cell, context["helpful_tip"], size=6.5, color=WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
+    tip_para = _para(tip_cell, align=WD_ALIGN_PARAGRAPH.CENTER)
+    _add_circle_shape(tip_para, diameter_mm=34, fill_hex="105652",
+                       title="Helpful Tip", body_text=context["helpful_tip"])
     _clear_empty_leading_paragraph(perf_content)
 
-    _spacer(doc, pt=6)
+    _spacer(doc, pt=3)
     insights = doc.add_table(rows=1, cols=3)
     _no_borders(insights)
     _set_col_widths(insights, [5.93, 5.93, 5.94])
@@ -369,7 +441,7 @@ def render_docx(context: dict, output_path: str):
     for i, name in enumerate(context["top_operatives"], 1):
         _para(col3, f"{i}. {name}", size=8, color=WHITE, align=WD_ALIGN_PARAGRAPH.RIGHT)
 
-    _spacer(doc, pt=6)
+    _spacer(doc, pt=3)
     _para(doc, "Commentary:", size=9, bold=True, color=TEAL, upper=True)
     for bullet in context["commentary"]:
         _para(doc, bullet, size=8.5, style="List Bullet")
