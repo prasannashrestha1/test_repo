@@ -36,7 +36,7 @@ import os
 from xml.sax.saxutils import escape as _xml_escape
 
 from docx import Document
-from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -400,8 +400,18 @@ def render_docx(context: dict, output_path: str):
 
     tip_cell.vertical_alignment = 1  # center
     tip_para = _para(tip_cell, align=WD_ALIGN_PARAGRAPH.CENTER)
-    _add_circle_shape(tip_para, diameter_mm=34, fill_hex="105652",
+    circle_diameter_mm = 34
+    _add_circle_shape(tip_para, diameter_mm=circle_diameter_mm, fill_hex="105652",
                        title="Helpful Tip", body_text=context["helpful_tip"])
+    # Word's row-height auto-calculation doesn't reliably count an inline
+    # drawing's height toward the row it sits in the same way it counts
+    # ordinary text -- the PDF export path recalculates layout and looked
+    # correct, but Word's own on-screen view left this row sized to
+    # perf_cell's much shorter nested table, so the 34mm circle overflowed
+    # upward into the row above rather than the row expanding to fit it.
+    # Forcing an explicit minimum height removes that ambiguity outright.
+    perf_wrap.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+    perf_wrap.rows[0].height = Mm(circle_diameter_mm + 2)
     _clear_empty_leading_paragraph(perf_content)
 
     _spacer(doc, pt=3)
