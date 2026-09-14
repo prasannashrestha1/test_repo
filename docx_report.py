@@ -30,10 +30,10 @@ import os
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Cm, Mm, Pt, RGBColor
 
 TEAL = RGBColor(0x10, 0x56, 0x52)
 RED = RGBColor(0xFF, 0x31, 0x31)
@@ -80,7 +80,32 @@ def _set_run(run, size=10, bold=False, italic=False, color=BLACK, upper=False):
     run.font.bold = bold
     run.font.italic = italic
     run.font.color.rgb = color
+    # Set directly on every run rather than relying on the Normal style
+    # cascading down — a run with its own rPr (which every one of these has,
+    # since size/bold/color are all direct formatting) should inherit the
+    # style's font in Word's own rendering model, but setting it explicitly
+    # here removes any dependency on that cascade actually happening the way
+    # the spec says it should.
+    run.font.name = "Arial"
+    rFonts = run._element.get_or_add_rPr().get_or_add_rFonts()
+    rFonts.set(qn("w:eastAsia"), "Arial")
     return run
+
+
+def _set_cell_margins(cell, top_mm=None, bottom_mm=None, left_mm=None, right_mm=None):
+    """Sets cell padding (OOXML tcMar) in millimeters, matching template.html's
+    CSS padding on table.plain/table.listings cells and the panel elements.
+    python-docx has no high-level API for this either — table cells default
+    to Word's own built-in margins, which don't match the CSS values at all."""
+    mar = OxmlElement("w:tcMar")
+    for tag, val_mm in (("top", top_mm), ("bottom", bottom_mm), ("left", left_mm), ("right", right_mm)):
+        if val_mm is None:
+            continue
+        el = OxmlElement(f"w:{tag}")
+        el.set(qn("w:w"), str(int(Mm(val_mm).twips)))
+        el.set(qn("w:type"), "dxa")
+        mar.append(el)
+    cell._tc.get_or_add_tcPr().append(mar)
 
 
 def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
@@ -110,6 +135,21 @@ def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
         p.alignment = align
     if text:
         _set_run(p.add_run(text), size=size, bold=bold, italic=italic, color=color, upper=upper)
+    return p
+
+
+def _spacer(doc, pt=6):
+    """A small gap between sections, matching template.html's tight
+    margins (4-6mm) — NOT achieved via a run's font size, because an empty
+    paragraph (no text, so no run at all) doesn't hold one: its height comes
+    from the paragraph's own default line spacing, and with the document-wide
+    1.4 line-spacing rule that made every "spacer" identically tall regardless
+    of what size was passed in. Setting exact line spacing directly on this
+    one paragraph is what actually controls its height.
+    """
+    p = doc.add_paragraph()
+    p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    p.paragraph_format.line_spacing = Pt(pt)
     return p
 
 
@@ -200,6 +240,9 @@ def render_docx(context: dict, output_path: str):
     # paragraphs below now control gaps explicitly via font size instead.
     normal.paragraph_format.space_after = Pt(0)
     normal.paragraph_format.space_before = Pt(0)
+    # template.html's line-height: 1.4 on html/body -- Word's own default
+    # single-spacing is tighter than that for most fonts.
+    normal.paragraph_format.line_spacing = 1.4
 
     section = doc.sections[0]
     section.page_width = Cm(21.0)
@@ -236,7 +279,7 @@ def render_docx(context: dict, output_path: str):
         _set_run(p.add_run(f"{label}: "), size=9, color=TEAL)
         _set_run(p.add_run(value), size=9, bold=True, color=BLACK)
 
-    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
+    _spacer(doc, pt=6)
     exec_content = _labeled_row(doc, "Executive Snapshot")
     exec_table = exec_content.add_table(rows=1, cols=3)
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -245,6 +288,7 @@ def render_docx(context: dict, output_path: str):
         _para(hdr[i], label, size=8, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
         _set_cell_bottom_border(hdr[i], "105652", 12)
+        _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["exec_snapshot"]:
         cells = exec_table.add_row().cells
         _para(cells[0], row["label"], size=8.5, bold=True, upper=True)
@@ -253,9 +297,10 @@ def render_docx(context: dict, output_path: str):
               color=TEAL if row["positive"] else RED)
         for cell in cells:
             _set_cell_bottom_border(cell, "B9C4BF", 6)
+            _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
     _clear_empty_leading_paragraph(exec_content)
 
-    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
+    _spacer(doc, pt=6)
     perf_content = _labeled_row(doc, "Performance Overview")
     perf_wrap = perf_content.add_table(rows=1, cols=2)
     _no_borders(perf_wrap)
@@ -268,6 +313,7 @@ def render_docx(context: dict, output_path: str):
         _para(hdr[i], label, size=8, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
         _set_cell_bottom_border(hdr[i], "105652", 12)
+        _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["performance_overview"]:
         cells = perf_table.add_row().cells
         _para(cells[0], row["property_type"], size=8.5, bold=True, upper=True)
@@ -275,22 +321,30 @@ def render_docx(context: dict, output_path: str):
         _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         for cell in cells:
             _set_cell_bottom_border(cell, "B9C4BF", 6)
+            _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
     _clear_empty_leading_paragraph(perf_cell)
 
     _shade_cell(tip_cell, "105652")
     tip_cell.vertical_alignment = 1  # center
+    _set_cell_margins(tip_cell, top_mm=3, bottom_mm=3, left_mm=3, right_mm=3)
     _para(tip_cell, "Helpful Tip", size=7.5, bold=True, color=WHITE, upper=True,
           align=WD_ALIGN_PARAGRAPH.CENTER)
     _para(tip_cell, context["helpful_tip"], size=6.5, color=WHITE, align=WD_ALIGN_PARAGRAPH.CENTER)
     _clear_empty_leading_paragraph(perf_content)
 
-    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
+    _spacer(doc, pt=6)
     insights = doc.add_table(rows=1, cols=3)
     _no_borders(insights)
     _set_col_widths(insights, [5.93, 5.93, 5.94])
     for c in range(3):
         _shade_cell(insights.cell(0, c), "105652")
     col1, col2, col3 = insights.cell(0, 0), insights.cell(0, 1), insights.cell(0, 2)
+    # .insights-panel { padding: 4mm 7mm; gap: 8mm } -- the 7mm is the panel's
+    # own outer edge, the 8mm gap between columns splits ~4mm to each side of
+    # the inner edges; top/bottom (4mm) applies uniformly to all three.
+    _set_cell_margins(col1, top_mm=4, bottom_mm=4, left_mm=7, right_mm=4)
+    _set_cell_margins(col2, top_mm=4, bottom_mm=4, left_mm=4, right_mm=4)
+    _set_cell_margins(col3, top_mm=4, bottom_mm=4, left_mm=4, right_mm=7)
 
     _para(col1, "Key Insights", size=9, bold=True, color=WHITE, upper=True)
     _para(col1, "Featured Listing", size=8, bold=True, italic=True, color=WHITE)
@@ -315,7 +369,7 @@ def render_docx(context: dict, output_path: str):
     for i, name in enumerate(context["top_operatives"], 1):
         _para(col3, f"{i}. {name}", size=8, color=WHITE, align=WD_ALIGN_PARAGRAPH.RIGHT)
 
-    _para(doc, size=6)  # tight spacer, replaces Word default paragraph spacing
+    _spacer(doc, pt=6)
     _para(doc, "Commentary:", size=9, bold=True, color=TEAL, upper=True)
     for bullet in context["commentary"]:
         _para(doc, bullet, size=8.5, style="List Bullet")
@@ -340,8 +394,10 @@ def render_docx(context: dict, output_path: str):
         for i in range(rows):
             left_val = page["left"][i] if i < len(page["left"]) else ""
             right_val = page["right"][i] if i < len(page["right"]) else ""
-            _para(listing_table.cell(i, 0), left_val, size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
-            _para(listing_table.cell(i, 1), right_val, size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+            for c, val in ((0, left_val), (1, right_val)):
+                cell = listing_table.cell(i, c)
+                _para(cell, val, size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+                _set_cell_margins(cell, top_mm=3, bottom_mm=3, left_mm=4, right_mm=4)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     doc.save(output_path)
