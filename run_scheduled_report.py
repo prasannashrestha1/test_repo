@@ -42,14 +42,33 @@ def period_dict(window: dict) -> dict:
     }
 
 
+def _is_truthy_env(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def main() -> int:
     today = datetime.now()
     print(f"[{today.isoformat()}] run_scheduled_report starting")
 
     window = compute_period(today)
     if window is None:
-        print(f"Not a reporting day (today is the {today.day}); skipping.")
-        return 0
+        # FORCE_RUN_REPORT is a deliberate, explicit opt-in for testing the
+        # real scheduled entry point (Drive/email delivery included) on a
+        # day that isn't the 1st or 15th -- e.g. proving the routine's
+        # network/secrets setup actually works before the next real
+        # reporting day. It does not touch the guard itself: every
+        # unattended/production run still has it unset and is still skipped
+        # on an off-cycle day exactly as before. When set, the period window
+        # used is whatever this month's 15th would compute, so the test
+        # report still reflects a real (recent) window instead of an
+        # arbitrary one.
+        if _is_truthy_env("FORCE_RUN_REPORT"):
+            print(f"FORCE_RUN_REPORT is set — today ({today.day}) isn't a reporting day, "
+                  f"but running anyway for testing.")
+            window = compute_period(today.replace(day=15))
+        else:
+            print(f"Not a reporting day (today is the {today.day}); skipping.")
+            return 0
 
     with open(os.path.join(SCRIPT_DIR, "config.json")) as f:
         config = json.load(f)

@@ -163,6 +163,23 @@ The routine's own prompt does not need to handle delivery itself — it's code,
 not agent behavior, so it happens the same way on every run rather than
 depending on the routine correctly remembering to do it each time.
 
+### Testing the routine on a day that isn't the 1st or 15th
+
+Set `FORCE_RUN_REPORT=true` as an environment variable / secret on the
+routine to make it run anyway — this is an explicit, temporary opt-in for
+testing only; it does not weaken the guard itself, which stays in place
+and unset for every real scheduled run. With it set, the command is
+unchanged (`python run_scheduled_report.py`) and behaves exactly like a real
+run would (all offices, real Drive/email delivery), just using the period
+window this month's 15th would compute. Remove it once you've confirmed the
+routine works, so the next real 1st/15th run isn't skipped by mistake — it
+wouldn't be (the guard still fires normally), but there's no reason to leave
+a test-only override set permanently.
+
+This still safely targets Bubble's test/staging root, same as any other run
+— `FORCE_RUN_REPORT` only bypasses the date check, not the separate
+`BUBBLE_ALLOW_PRODUCTION` + `BUBBLE_BASE_URL` gate production requires.
+
 ## Uploading PDFs to Drive
 
 Upload is a **Google Cloud service account**, not the Drive connector Claude
