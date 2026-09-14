@@ -486,11 +486,13 @@ def render_docx(context: dict, output_path: str):
     _spacer(doc, pt=Mm(8).pt)
     insights = doc.add_table(rows=1, cols=3)
     _no_borders(insights)
-    # Narrower than the full page width and centered, rather than stretched
-    # edge-to-edge like the header/tables above it -- sized to roughly what
-    # its own content needs rather than the full 17.8cm content width.
-    _set_col_widths(insights, [4.73, 4.73, 4.74])
-    insights.alignment = WD_TABLE_ALIGNMENT.CENTER
+    # Full container width -- spans the same total width as the row-label +
+    # content area above it (17.8cm), same as the header/tables. The actual
+    # bug reported earlier wasn't the width, it was that this table rendered
+    # with an unwanted left offset in Google Docs despite that; the
+    # explicit width + zeroed indent in _set_col_widths is what actually
+    # fixes that positioning, independent of how wide the table itself is.
+    _set_col_widths(insights, [5.93, 5.93, 5.94])
     for c in range(3):
         _shade_cell(insights.cell(0, c), "105652")
     col1, col2, col3 = insights.cell(0, 0), insights.cell(0, 1), insights.cell(0, 2)
