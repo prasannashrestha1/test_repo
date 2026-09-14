@@ -36,7 +36,7 @@ import os
 from xml.sax.saxutils import escape as _xml_escape
 
 from docx import Document
-from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -172,13 +172,37 @@ def _set_col_widths(table, widths_cm):
     the column width we asked for. Fixed layout, plus rewriting the table's
     grid column widths (not just each cell's), is what makes Word actually
     honor them.
+
+    Also pins the table's own overall preferred width (w:tblW) and zeroes
+    its indent (w:tblInd) explicitly, rather than leaving Word to infer the
+    table's width/position from its grid columns. Leaving those implicit was
+    fine in Word itself, but Google Docs' docx renderer positioned at least
+    one borderless table (the Key Insights panel) visibly further left than
+    the header/other tables above it despite identical column-width math —
+    an explicit width/indent removes that ambiguity for any renderer, Word
+    included.
     """
+    total_cm = sum(widths_cm)
     tbl = table._tbl
     tbl_pr = tbl.tblPr
     if tbl_pr.find(qn("w:tblLayout")) is None:
         layout = OxmlElement("w:tblLayout")
         layout.set(qn("w:type"), "fixed")
         tbl_pr.append(layout)
+
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    if tbl_w is None:
+        tbl_w = OxmlElement("w:tblW")
+        tbl_pr.append(tbl_w)
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_w.set(qn("w:w"), str(int(Cm(total_cm).twips)))
+
+    tbl_ind = tbl_pr.find(qn("w:tblInd"))
+    if tbl_ind is None:
+        tbl_ind = OxmlElement("w:tblInd")
+        tbl_pr.append(tbl_ind)
+    tbl_ind.set(qn("w:type"), "dxa")
+    tbl_ind.set(qn("w:w"), "0")
 
     grid = tbl.find(qn("w:tblGrid"))
     if grid is not None:
@@ -298,7 +322,15 @@ def _labeled_row(doc, label_text: str):
     _set_col_widths(wrap, [3.0, 0.6, 14.2])
     label_cell, content_cell = wrap.cell(0, 0), wrap.cell(0, 2)
     # .row-label { padding-top: 1.5mm } -- nudges the label down to align
-    # with the table header baseline instead of its own top edge.
+    # with the table header baseline instead of its own top edge. This only
+    # has an effect if the cell is actually top-aligned in the first place —
+    # without an explicit vertical_alignment, at least one renderer seen in
+    # testing centered the label vertically across the *entire* row's height
+    # (which spans the whole exec/perf table below it, not just its header),
+    # leaving the label looking like it floats independently of the header
+    # line it's meant to sit beside.
+    label_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+    content_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
     _set_cell_margins(label_cell, top_mm=1.5)
     _para(label_cell, label_text, size=9, bold=True, color=TEAL, upper=True)
     return content_cell
@@ -370,12 +402,6 @@ def render_docx(context: dict, output_path: str):
     exec_table = exec_content.add_table(rows=1, cols=3)
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     hdr = exec_table.rows[0].cells
-    # Word's default (autofit) column widths don't leave the first column as
-    # much room as a browser's own table auto-layout does for the same
-    # markup, so the longest header ("Change vs. Previous Period") and
-    # labels ("Total Current Status Listings") were wrapping to 2 lines here
-    # even though they don't in the PDF. Sized down a notch so they fit on
-    # one line without needing to touch the column widths themselves.
     for i, label in enumerate(("Metric", "Result", "Change vs. Previous Period")):
         _para(hdr[i], label, size=7, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
@@ -383,13 +409,19 @@ def render_docx(context: dict, output_path: str):
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["exec_snapshot"]:
         cells = exec_table.add_row().cells
-        _para(cells[0], row["label"], size=6.5, bold=True, upper=True)
+        _para(cells[0], row["label"], size=7.5, bold=True, upper=True)
         _para(cells[1], row["result"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["change"], size=9, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER,
               color=TEAL if row["positive"] else RED)
         for cell in cells:
             _set_cell_bottom_border(cell, "B9C4BF", 6)
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
+    # Result only ever holds a short number/percentage -- giving Metric most
+    # of the row's width (so its longer uppercase labels stay comfortably on
+    # one line at a readable size) and Result very little is both a closer
+    # match to how much room each column's actual content needs, and what
+    # was asked for directly: a narrower Result column.
+    _set_col_widths(exec_table, [6.5, 3.0, 4.7])
     _clear_empty_leading_paragraph(exec_content)
 
     # table.plain's own margin-bottom (4mm, inside row-content) plus
@@ -400,13 +432,11 @@ def render_docx(context: dict, output_path: str):
     # .two-col { gap: 6mm } -- middle spacer column, same approach as above.
     perf_wrap = perf_content.add_table(rows=1, cols=3)
     _no_borders(perf_wrap)
-    _set_col_widths(perf_wrap, [10.0, 0.6, 3.6])
+    _set_col_widths(perf_wrap, [9.4, 0.6, 4.2])
     perf_cell, tip_cell = perf_wrap.cell(0, 0), perf_wrap.cell(0, 2)
 
     perf_table = perf_cell.add_table(rows=1, cols=3)
     hdr = perf_table.rows[0].cells
-    # Same one-line fix as the Executive Snapshot table above, kept
-    # consistent between the two tables sharing this style.
     for i, label in enumerate(("Property Type", "Listings", "Matches")):
         _para(hdr[i], label, size=7, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
@@ -414,19 +444,32 @@ def render_docx(context: dict, output_path: str):
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["performance_overview"]:
         cells = perf_table.add_row().cells
-        _para(cells[0], row["property_type"], size=6.5, bold=True, upper=True)
+        _para(cells[0], row["property_type"], size=7.5, bold=True, upper=True)
         _para(cells[1], row["listings"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
         for cell in cells:
             _set_cell_bottom_border(cell, "B9C4BF", 6)
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
+    # Same reasoning as the Executive Snapshot table: Listings/Matches only
+    # ever hold a short number, so Property Type gets most of the width.
+    _set_col_widths(perf_table, [4.7, 2.0, 2.7])
     _clear_empty_leading_paragraph(perf_cell)
 
     tip_cell.vertical_alignment = 1  # center
     tip_para = _para(tip_cell, align=WD_ALIGN_PARAGRAPH.CENTER)
-    circle_diameter_mm = 34
+    # 38mm rather than the CSS's exact 32mm -- a deliberate, larger buffer
+    # than before. The circle's text is a hand-built DrawingML shape+textbox
+    # (see _add_circle_shape's docstring); real Word renders it correctly at
+    # 34mm, but Google Docs' docx renderer does not reliably keep the text
+    # box visually anchored inside the shape at all -- its text appeared
+    # below the circle entirely, not just overflowing its edge. A bigger
+    # shape with a smaller font (below) narrows that gap, though it may not
+    # fully close it if Google Docs' shape support is the real limit rather
+    # than available space.
+    circle_diameter_mm = 38
     _add_circle_shape(tip_para, diameter_mm=circle_diameter_mm, fill_hex="105652",
-                       title="Helpful Tip", body_text=context["helpful_tip"])
+                       title="Helpful Tip", body_text=context["helpful_tip"],
+                       title_size_pt=7, body_size_pt=6)
     # Word's row-height auto-calculation doesn't reliably count an inline
     # drawing's height toward the row it sits in the same way it counts
     # ordinary text -- the PDF export path recalculates layout and looked
@@ -435,7 +478,7 @@ def render_docx(context: dict, output_path: str):
     # upward into the row above rather than the row expanding to fit it.
     # Forcing an explicit minimum height removes that ambiguity outright.
     perf_wrap.rows[0].height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-    perf_wrap.rows[0].height = Mm(circle_diameter_mm + 2)
+    perf_wrap.rows[0].height = Mm(circle_diameter_mm + 4)
     _clear_empty_leading_paragraph(perf_content)
 
     # .two-col's own margin-bottom (4mm) plus .labeled-row's (4mm) stack to
@@ -443,7 +486,11 @@ def render_docx(context: dict, output_path: str):
     _spacer(doc, pt=Mm(8).pt)
     insights = doc.add_table(rows=1, cols=3)
     _no_borders(insights)
-    _set_col_widths(insights, [5.93, 5.93, 5.94])
+    # Narrower than the full page width and centered, rather than stretched
+    # edge-to-edge like the header/tables above it -- sized to roughly what
+    # its own content needs rather than the full 17.8cm content width.
+    _set_col_widths(insights, [4.73, 4.73, 4.74])
+    insights.alignment = WD_TABLE_ALIGNMENT.CENTER
     for c in range(3):
         _shade_cell(insights.cell(0, c), "105652")
     col1, col2, col3 = insights.cell(0, 0), insights.cell(0, 1), insights.cell(0, 2)
