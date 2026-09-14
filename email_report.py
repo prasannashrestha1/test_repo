@@ -16,6 +16,7 @@ never committed, never printed. Sending is a deliberate no-op, not an error,
 when they aren't configured, so mock/test-version runs and local development
 never need email access at all.
 """
+import mimetypes
 import os
 import smtplib
 import socket
@@ -50,15 +51,17 @@ def _connect_smtp_ipv4(host: str, port: int, timeout: int) -> smtplib.SMTP:
 
 
 def send_report_email(pdf_paths: list, to_addrs: list, subject: str = None, body: str = None) -> dict:
-    """Email every PDF in pdf_paths as attachments, in one message, to to_addrs.
+    """Email every file in pdf_paths as attachments, in one message, to to_addrs.
+    Despite the name (kept for backward compatibility with existing callers),
+    this works for any file type, not just PDFs -- e.g. the .docx report.
 
     Returns {"status": ..., ...}:
       "sent"    — delivered; includes "to" and "count"
-      "skipped" — not an error; includes "reason" (no credentials/recipients/PDFs)
+      "skipped" — not an error; includes "reason" (no files/recipients/credentials)
       "failed"  — includes "error"
     """
     if not pdf_paths:
-        return {"status": "skipped", "reason": "no PDFs to send"}
+        return {"status": "skipped", "reason": "no files to send"}
 
     if not to_addrs:
         print("no recipients configured — skipping email delivery")
@@ -85,12 +88,17 @@ def send_report_email(pdf_paths: list, to_addrs: list, subject: str = None, body
             "plain",
         ))
 
-        # A missing/unreadable PDF (e.g. from a bad path) must fail cleanly
+        # A missing/unreadable file (e.g. from a bad path) must fail cleanly
         # too, not just an SMTP-connection problem — this whole block is one
         # try so nothing here can crash the caller.
         for path in pdf_paths:
+            mime_type, _ = mimetypes.guess_type(path)
+            # MIMEApplication wants the subtype only ("pdf", not "application/pdf");
+            # falls back to a generic binary subtype for anything guess_type
+            # doesn't recognize, rather than mislabeling every attachment as a PDF.
+            subtype = mime_type.split("/", 1)[1] if mime_type else "octet-stream"
             with open(path, "rb") as f:
-                part = MIMEApplication(f.read(), _subtype="pdf")
+                part = MIMEApplication(f.read(), _subtype=subtype)
             part.add_header("Content-Disposition", "attachment", filename=os.path.basename(path))
             msg.attach(part)
 
