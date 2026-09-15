@@ -463,14 +463,14 @@ def render_docx(context: dict, output_path: str):
     exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
     hdr = exec_table.rows[0].cells
     for i, label in enumerate(("Metric", "Result", "Change vs. Previous Period")):
-        _para(hdr[i], label, size=7, bold=True, upper=True,
+        _para(hdr[i], label, size=8, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER,
               font_name="Inter")
         _set_cell_bottom_border(hdr[i], "105652", 12)
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["exec_snapshot"]:
         cells = exec_table.add_row().cells
-        _para(cells[0], row["label"], size=7.5, bold=True, upper=True, font_name="Inter")
+        _para(cells[0], row["label"], size=8.5, bold=True, upper=True, font_name="Inter")
         _para(cells[1], row["result"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER, font_name="Inter")
         _para(cells[2], row["change"], size=9, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER,
               color=TEAL if row["positive"] else RED, font_name="Inter")
@@ -499,14 +499,14 @@ def render_docx(context: dict, output_path: str):
     perf_table = perf_cell.add_table(rows=1, cols=3)
     hdr = perf_table.rows[0].cells
     for i, label in enumerate(("Property Type", "Listings", "Matches")):
-        _para(hdr[i], label, size=7, bold=True, upper=True,
+        _para(hdr[i], label, size=8, bold=True, upper=True,
               align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER,
               font_name="Inter")
         _set_cell_bottom_border(hdr[i], "105652", 12)
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["performance_overview"]:
         cells = perf_table.add_row().cells
-        _para(cells[0], row["property_type"], size=7.5, bold=True, upper=True, font_name="Inter")
+        _para(cells[0], row["property_type"], size=8.5, bold=True, upper=True, font_name="Inter")
         _para(cells[1], row["listings"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER, font_name="Inter")
         _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER, font_name="Inter")
         for cell in cells:
@@ -531,7 +531,7 @@ def render_docx(context: dict, output_path: str):
     circle_diameter_mm = 38
     _add_circle_shape(tip_para, diameter_mm=circle_diameter_mm, fill_hex="105652",
                        title="Helpful Tip", body_text=context["helpful_tip"],
-                       title_size_pt=7, body_size_pt=6)
+                       title_size_pt=7.5, body_size_pt=6.5)
     # Word's row-height auto-calculation doesn't reliably count an inline
     # drawing's height toward the row it sits in the same way it counts
     # ordinary text -- the PDF export path recalculates layout and looked
@@ -580,7 +580,7 @@ def render_docx(context: dict, output_path: str):
     # the PDF's own text, push Word's page count from 2 to 3. Shrinking this
     # one block's font a half-point recovers most of that without cutting
     # any of the actual commentary content below.
-    INSIGHT_BODY_SIZE = 7.5
+    INSIGHT_BODY_SIZE = 8
 
     def _insight_block(cell, label, *lines, align=None, gap_before_last=None):
         # .insight-block { margin-bottom: 3mm } -- one call per block; the
@@ -635,7 +635,7 @@ def render_docx(context: dict, output_path: str):
         # described above: keeps the full commentary text intact rather than
         # cutting it, while still recovering the vertical room the CSS-
         # accurate section gaps above now take up.
-        p = _para(doc, bullet, size=7.5, style="List Bullet")
+        p = _para(doc, bullet, size=8.5, style="List Bullet")
         p.paragraph_format.space_after = Pt(Mm(2).pt)
 
     # ================= PAGES 2..N: MATCHED LISTINGS =================
