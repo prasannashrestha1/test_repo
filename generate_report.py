@@ -461,12 +461,17 @@ def compute_listing_pages(matches_current, rows_per_col=15):
             }
     addresses = [v["address"] for v in sorted(seen.values(), key=lambda r: (r["suburb"], r["address"]))]
 
+    # Row-major fill (left, right, left, right, ...) rather than filling the
+    # entire left column before starting the right one -- with an odd or
+    # uneven total, column-major left the right column empty for most of
+    # the page (e.g. 13 rows on the left, only 6 on the right); row-major
+    # only ever leaves a gap on the very last row, if any.
     per_page = rows_per_col * 2
     pages = []
     for i in range(0, len(addresses), per_page):
         chunk = addresses[i:i + per_page]
-        left = chunk[:rows_per_col]
-        right = chunk[rows_per_col:]
+        left = chunk[0::2]
+        right = chunk[1::2]
         pages.append({"left": left, "right": right})
     return pages
 
