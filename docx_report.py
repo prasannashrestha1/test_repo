@@ -71,6 +71,25 @@ def _no_borders(table):
     tbl_pr.append(borders)
 
 
+def _set_full_borders(table, color_hex: str, sz: int):
+    """Sets a solid box-and-grid border on every edge of a table (outer box
+    plus the lines between cells) — matches table.listings' CSS border,
+    which is on the table AND every cell. Explicit, rather than relying on
+    Word's built-in "Table Grid" style: that style's own default border
+    weight doesn't track whatever width we actually want, which is exactly
+    why the Matched Listings table was rendering visibly thinner than the
+    reference design's bolder grid."""
+    tbl_pr = table._tbl.tblPr
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "single")
+        el.set(qn("w:sz"), str(sz))
+        el.set(qn("w:color"), color_hex)
+        borders.append(el)
+    tbl_pr.append(borders)
+
+
 def _clear_empty_leading_paragraph(cell):
     """A table cell always starts with exactly one empty paragraph (OOXML
     requires at least one) — this only matters when content is added as a
@@ -641,7 +660,10 @@ def render_docx(context: dict, output_path: str):
 
         rows = max(len(page["left"]), len(page["right"]))
         listing_table = doc.add_table(rows=rows, cols=2)
-        listing_table.style = "Table Grid"
+        # table.listings { border: 2.5px solid #000000 } -- explicit, not
+        # Word's built-in "Table Grid" style, whose own default weight was
+        # rendering visibly thinner than intended.
+        _set_full_borders(listing_table, "000000", 20)
         _set_col_widths(listing_table, [8.9, 8.9])
         for i in range(rows):
             left_val = page["left"][i] if i < len(page["left"]) else ""
