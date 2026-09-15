@@ -33,5 +33,5 @@
   "property_required_status": "Available",
   "property_min_backend_price": 50000,
   "_token_note": "The Bubble API token is supplied ONLY via the BUBBLE_API_TOKEN environment variable -- never stored in this file or anywhere else in the repo. Cloud routines/CI should inject it as a secret; local development reads it from a gitignored .env file (see .env.example), or from --env-file.",
-  "report_email_recipients": ["lightningdev5@lightningproduct.io"]
+  "report_email_recipients": ["lightningdev5@lightningproduct.io", "andrew@lightningproduct.io"]
 }
