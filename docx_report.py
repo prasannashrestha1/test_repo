@@ -181,8 +181,20 @@ def _set_col_widths(table, widths_cm):
     the header/other tables above it despite identical column-width math —
     an explicit width/indent removes that ambiguity for any renderer, Word
     included.
+
+    w:tblW is set to the SUM OF THE ALREADY-ROUNDED per-column twips values,
+    not a separately-rounded total (e.g. int(Cm(5.93).twips) three times
+    doesn't necessarily sum to int(Cm(17.8).twips) -- each rounds/truncates
+    independently, and for these three widths specifically it's off by a
+    single twip). A twip is far too small to see on its own, but it means
+    the table's own declared total width didn't exactly match the sum of
+    its columns -- an internal inconsistency a renderer has to silently
+    resolve somehow, and manually dragging the table's edge in Word/Docs
+    (reported as "the left and right margins don't match" after doing so)
+    is exactly the kind of interaction that can expose which side it
+    resolves it on.
     """
-    total_cm = sum(widths_cm)
+    col_twips = [int(Cm(w).twips) for w in widths_cm]
     tbl = table._tbl
     tbl_pr = tbl.tblPr
     if tbl_pr.find(qn("w:tblLayout")) is None:
@@ -195,7 +207,7 @@ def _set_col_widths(table, widths_cm):
         tbl_w = OxmlElement("w:tblW")
         tbl_pr.append(tbl_w)
     tbl_w.set(qn("w:type"), "dxa")
-    tbl_w.set(qn("w:w"), str(int(Cm(total_cm).twips)))
+    tbl_w.set(qn("w:w"), str(sum(col_twips)))
 
     tbl_ind = tbl_pr.find(qn("w:tblInd"))
     if tbl_ind is None:
@@ -206,12 +218,21 @@ def _set_col_widths(table, widths_cm):
 
     grid = tbl.find(qn("w:tblGrid"))
     if grid is not None:
-        for grid_col, w in zip(grid.findall(qn("w:gridCol")), widths_cm):
-            grid_col.set(qn("w:w"), str(int(Cm(w).twips)))
+        for grid_col, w_twips in zip(grid.findall(qn("w:gridCol")), col_twips):
+            grid_col.set(qn("w:w"), str(w_twips))
 
+    # Setting each cell's own tcW from the same col_twips values (rather than
+    # cell.width = Cm(w), which re-derives dxa from EMU independently) keeps
+    # tblW/gridCol/tcW all traceable to one single rounded value per column,
+    # instead of three separate roundings that could each land a twip apart.
     for row in table.rows:
-        for cell, w in zip(row.cells, widths_cm):
-            cell.width = Cm(w)
+        for cell, w_twips in zip(row.cells, col_twips):
+            tcW = cell._tc.get_or_add_tcPr().find(qn("w:tcW"))
+            if tcW is None:
+                tcW = OxmlElement("w:tcW")
+                cell._tc.get_or_add_tcPr().append(tcW)
+            tcW.set(qn("w:type"), "dxa")
+            tcW.set(qn("w:w"), str(w_twips))
 
 
 def _set_page_background(doc, hex_color: str):
