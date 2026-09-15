@@ -100,7 +100,7 @@ def _clear_empty_leading_paragraph(cell):
         cell.paragraphs[0]._p.getparent().remove(cell.paragraphs[0]._p)
 
 
-def _set_run(run, size=10, bold=False, italic=False, color=BLACK, upper=False):
+def _set_run(run, size=10, bold=False, italic=False, color=BLACK, upper=False, font_name="Arial"):
     if upper:
         run.text = run.text.upper()
     run.font.size = Pt(size)
@@ -113,9 +113,15 @@ def _set_run(run, size=10, bold=False, italic=False, color=BLACK, upper=False):
     # style's font in Word's own rendering model, but setting it explicitly
     # here removes any dependency on that cascade actually happening the way
     # the spec says it should.
-    run.font.name = "Arial"
+    # font_name defaults to Arial (the document-wide baseline) -- only the
+    # Executive Snapshot/Performance Overview tables, the header-meta block,
+    # and the office-name title pass a different one (Inter / Bebas Neue),
+    # per an explicit, narrowly-scoped request. Word substitutes a fallback
+    # if the actual font isn't installed on the machine opening the file,
+    # same as any other missing-font case -- it won't error either way.
+    run.font.name = font_name
     rFonts = run._element.get_or_add_rPr().get_or_add_rFonts()
-    rFonts.set(qn("w:eastAsia"), "Arial")
+    rFonts.set(qn("w:eastAsia"), font_name)
     return run
 
 
@@ -136,7 +142,7 @@ def _set_cell_margins(cell, top_mm=None, bottom_mm=None, left_mm=None, right_mm=
 
 
 def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
-          align=None, upper=False, style=None):
+          align=None, upper=False, style=None, font_name="Arial"):
     """Add a styled paragraph to a Document or a table cell.
 
     A fresh table cell always has exactly one, empty paragraph already
@@ -161,7 +167,8 @@ def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
     if align is not None:
         p.alignment = align
     if text:
-        _set_run(p.add_run(text), size=size, bold=bold, italic=italic, color=color, upper=upper)
+        _set_run(p.add_run(text), size=size, bold=bold, italic=italic, color=color, upper=upper,
+                 font_name=font_name)
     return p
 
 
@@ -372,7 +379,7 @@ def _labeled_row(doc, label_text: str):
     label_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
     content_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
     _set_cell_margins(label_cell, top_mm=1.5)
-    _para(label_cell, label_text, size=9, bold=True, color=TEAL, upper=True)
+    _para(label_cell, label_text, size=9, bold=True, color=TEAL, upper=True, font_name="Inter")
     return content_cell
 
 
@@ -430,7 +437,12 @@ def render_docx(context: dict, output_path: str):
     # by 1.4 on top left a visibly larger gap around the title specifically
     # than the PDF shows. Single-spacing just this one paragraph (not the
     # whole document) removes that compounding without touching anything else.
-    office_name_p = _para(left, context["office_name"], size=24, bold=True, upper=True)
+    # The reference design sets the office-name title in Bebas Neue, an
+    # already-heavy display font in its own right -- applying Word's bold on
+    # top of it (as we did for the Arial fallback) over-thickens it, which is
+    # why bold is explicitly off here specifically.
+    office_name_p = _para(left, context["office_name"], size=24, bold=False, upper=True,
+                           font_name="Bebas Neue")
     office_name_p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
     _para(left, "Quiet List Exchange Activity Report", size=11, bold=True, upper=True, color=TEAL)
     right = header_table.cell(0, 2)
@@ -441,8 +453,8 @@ def render_docx(context: dict, output_path: str):
         ("DATE", context["report_date_label"]),
     ):
         p = _para(right, align=WD_ALIGN_PARAGRAPH.RIGHT)
-        _set_run(p.add_run(f"{label}: "), size=9, color=TEAL)
-        _set_run(p.add_run(value), size=9, bold=True, color=BLACK)
+        _set_run(p.add_run(f"{label}: "), size=9, color=TEAL, font_name="Inter")
+        _set_run(p.add_run(value), size=9, bold=True, color=BLACK, font_name="Inter")
 
     # .header { margin-bottom: 5mm }
     _spacer(doc, pt=Mm(5).pt)
@@ -452,15 +464,16 @@ def render_docx(context: dict, output_path: str):
     hdr = exec_table.rows[0].cells
     for i, label in enumerate(("Metric", "Result", "Change vs. Previous Period")):
         _para(hdr[i], label, size=7, bold=True, upper=True,
-              align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
+              align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER,
+              font_name="Inter")
         _set_cell_bottom_border(hdr[i], "105652", 12)
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["exec_snapshot"]:
         cells = exec_table.add_row().cells
-        _para(cells[0], row["label"], size=7.5, bold=True, upper=True)
-        _para(cells[1], row["result"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _para(cells[0], row["label"], size=7.5, bold=True, upper=True, font_name="Inter")
+        _para(cells[1], row["result"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER, font_name="Inter")
         _para(cells[2], row["change"], size=9, bold=True, align=WD_ALIGN_PARAGRAPH.CENTER,
-              color=TEAL if row["positive"] else RED)
+              color=TEAL if row["positive"] else RED, font_name="Inter")
         for cell in cells:
             _set_cell_bottom_border(cell, "B9C4BF", 6)
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
@@ -487,14 +500,15 @@ def render_docx(context: dict, output_path: str):
     hdr = perf_table.rows[0].cells
     for i, label in enumerate(("Property Type", "Listings", "Matches")):
         _para(hdr[i], label, size=7, bold=True, upper=True,
-              align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER)
+              align=WD_ALIGN_PARAGRAPH.LEFT if i == 0 else WD_ALIGN_PARAGRAPH.CENTER,
+              font_name="Inter")
         _set_cell_bottom_border(hdr[i], "105652", 12)
         _set_cell_margins(hdr[i], top_mm=1.3, bottom_mm=1.3, left_mm=3, right_mm=3)
     for row in context["performance_overview"]:
         cells = perf_table.add_row().cells
-        _para(cells[0], row["property_type"], size=7.5, bold=True, upper=True)
-        _para(cells[1], row["listings"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
-        _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+        _para(cells[0], row["property_type"], size=7.5, bold=True, upper=True, font_name="Inter")
+        _para(cells[1], row["listings"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER, font_name="Inter")
+        _para(cells[2], row["matches"], size=9, align=WD_ALIGN_PARAGRAPH.CENTER, font_name="Inter")
         for cell in cells:
             _set_cell_bottom_border(cell, "B9C4BF", 6)
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)

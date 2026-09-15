@@ -45,6 +45,13 @@
 <head>
 <meta charset="UTF-8">
 <title>{{ office_name }} — Quiet List Exchange Activity Report</title>
+<!-- Inter and Bebas Neue: scoped to the office-name title, the Executive
+     Snapshot/Performance Overview tables, and the header-meta block only,
+     per an explicit request -- everything else (commentary, Key Insights,
+     Matched Listings, footer) stays on the document-wide Arial below. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;700&display=swap" rel="stylesheet">
 <style>
   /* margin:0 on @page + padding on .page below — Chromium's print-to-pdf does NOT
      paint CSS backgrounds into the @page margin area, so a nonzero @page margin
@@ -87,8 +94,12 @@
   }
   .header-title { flex: 1 1 auto; min-width: 0; }
   .office-name {
+    font-family: 'Bebas Neue', Arial, sans-serif;
     font-size: 24pt;
-    font-weight: 800;
+    /* Bebas Neue is already a heavy display face on its own -- font-weight:
+       800 (or Word's synthetic bold) over-thickens it, so this is
+       intentionally not bold, unlike the rest of this section's labels. */
+    font-weight: 400;
     letter-spacing: 0.5px;
     text-transform: uppercase;
     margin: 0;
@@ -109,6 +120,7 @@
     text-overflow: ellipsis;
   }
   .header-meta {
+    font-family: 'Inter', Arial, sans-serif;
     flex: 0 0 auto;
     max-width: 65mm;
     text-align: right;
@@ -129,6 +141,15 @@
     line-height: 1.25;
   }
 
+  /* .section-label is shared with "Commentary:" below, which must stay
+     Arial -- this more specific selector (higher specificity than the bare
+     .section-label rule, regardless of source order) scopes the font
+     change to just the two row-labels beside the Executive Snapshot /
+     Performance Overview tables. */
+  .row-label .section-label {
+    font-family: 'Inter', Arial, sans-serif;
+  }
+
   /* label sits beside its table, top-aligned — matches the sample's sidebar layout */
   .labeled-row {
     display: flex;
@@ -146,6 +167,7 @@
     margin-bottom: 4mm;
   }
   table.plain thead th {
+    font-family: 'Inter', Arial, sans-serif;
     text-align: center;
     font-size: 8pt;
     letter-spacing: 0.5px;
@@ -155,6 +177,7 @@
   }
   table.plain thead th:first-child { text-align: left; }
   table.plain tbody td {
+    font-family: 'Inter', Arial, sans-serif;
     text-align: center;
     padding: 1.6mm 3mm;
     border-bottom: 0.75px solid #b9c4bf;
