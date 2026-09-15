@@ -404,8 +404,16 @@ def render_docx(context: dict, output_path: str):
     _no_borders(header_table)
     _set_col_widths(header_table, [10.4, 0.6, 6.8])
     left = header_table.cell(0, 0)
-    _para(left, context["office_name"], size=24, bold=True, upper=True)
-    _para(left, "Quiet List Exchange Activity Report", size=11, bold=True, upper=True)
+    # The document-wide 1.4 line-spacing (matching template.html's line-height:
+    # 1.4 on body text) compounds very differently on a single 24pt line than
+    # it does on 9-10pt text -- Word's own single-line-spacing metric for a
+    # large bold font is already taller than Chromium's, so multiplying that
+    # by 1.4 on top left a visibly larger gap around the title specifically
+    # than the PDF shows. Single-spacing just this one paragraph (not the
+    # whole document) removes that compounding without touching anything else.
+    office_name_p = _para(left, context["office_name"], size=24, bold=True, upper=True)
+    office_name_p.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    _para(left, "Quiet List Exchange Activity Report", size=11, bold=True, upper=True, color=TEAL)
     right = header_table.cell(0, 2)
     for label, value in (
         (context["reporting_period_label"], context["office_name"]),
