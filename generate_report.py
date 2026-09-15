@@ -84,7 +84,6 @@ USAGE
 
 import argparse
 import asyncio
-import base64
 import json
 import os
 import re
@@ -554,52 +553,10 @@ def build_report_context(office: dict, period: dict, matches_current: list, matc
     }
 
 
-FONT_DIR = os.path.join(SCRIPT_DIR, "fonts")
-
-# (css font-family, file in fonts/, font-weight value or range)
-# Inter ships from Google Fonts as a single variable font covering the whole
-# weight axis, so one file serves both the 400 and 700 the template asks for
-# — hence a range rather than two separate files.
-EMBEDDED_FONTS = (
-    ("Inter", "Inter.woff2", "100 900"),
-    ("Bebas Neue", "BebasNeue-Regular.woff2", "400"),
-)
-
-
-def build_font_face_css() -> str:
-    """Return @font-face rules with the font files base64-inlined.
-
-    The template previously pulled Inter/Bebas Neue from Google Fonts over
-    the network, which failed silently in exactly the worst way: Chromium
-    rendered the PDF in the Arial fallback before the web fonts finished
-    downloading, so the PDF came out in Arial while the .docx asked for
-    Inter/Bebas Neue — the two outputs disagreed and nothing errored. A
-    cloud routine would have failed the same way (or harder, since
-    fonts.gstatic.com isn't on its allowed-domains list).
-
-    Inlining the bytes removes the network from the path entirely: no
-    allowlist entry needed, no race against the download, and the same
-    result locally and in the routine.
-    """
-    blocks = []
-    for family, filename, weight in EMBEDDED_FONTS:
-        with open(os.path.join(FONT_DIR, filename), "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("ascii")
-        blocks.append(
-            f"  @font-face {{\n"
-            f"    font-family: '{family}';\n"
-            f"    font-style: normal;\n"
-            f"    font-weight: {weight};\n"
-            f"    src: url(data:font/woff2;base64,{b64}) format('woff2');\n"
-            f"  }}"
-        )
-    return "\n".join(blocks)
-
-
 async def render_pdf(context: dict, output_path: str):
     env = Environment(loader=FileSystemLoader(SCRIPT_DIR))
     tpl = env.get_template("template.html")
-    html_out = tpl.render(**context, font_face_css=build_font_face_css())
+    html_out = tpl.render(**context)
 
     rendered_html_path = os.path.abspath(output_path.replace(".pdf", ".rendered.html"))
     with open(rendered_html_path, "w") as f:
@@ -609,10 +566,6 @@ async def render_pdf(context: dict, output_path: str):
         browser = await p.chromium.launch()
         page = await browser.new_page()
         await page.goto(f"file://{rendered_html_path}")
-        # goto() resolves on the load event, which does NOT wait for fonts to
-        # be applied — printing before this resolves is what silently baked
-        # the Arial fallback into the PDF.
-        await page.evaluate("document.fonts.ready")
         await page.pdf(path=output_path, format="A4", print_background=True)
         await browser.close()
 
