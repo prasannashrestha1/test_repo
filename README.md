@@ -70,12 +70,11 @@ playwright install chromium
 cp .env.example .env        # then paste in the real Bubble API token
 
 # Synthetic data, no network, no token — proves the PDF pipeline works
-python generate_report.py --mock --only-office 1
+python generate_report.py --mock --only-office 3
 
-# Real data against the TEST/staging Bubble version
-python generate_report.py --use-test-version --only-office 1 \
-    --period-start 2026-08-19 --period-end 2026-09-06 \
-    --prev-period-start 2026-07-01 --prev-period-end 2026-07-31
+# Real data against the TEST/staging Bubble version (no period flags needed —
+# defaults to the current reporting window)
+python generate_report.py --use-test-version --only-office 3
 ```
 
 PDFs land in `reports/`.
@@ -326,19 +325,20 @@ client-facing report changed accordingly.
 - ✅ Both the PDF and .docx are generated per office and delivered together
   (Drive + email); confirmed the office loop runs all of `offices.json` in
   one pass, not just one office
-- ⚠️ **Email delivery moved from Gmail SMTP to the SendGrid API** (SMTP's
-  port 587 is unreachable from a Claude Code routine's network sandbox, so
-  it could never work there) — code-complete and skip/failure paths tested,
-  but no real SendGrid account has been set up yet to prove an actual send;
-  the previous SMTP-based send *was* verified working, but only locally,
-  which is exactly what the routine can't do
-- ⚠️ **Drive delivery is code-complete but not yet verified with a real
-  upload** — every skip/failure path is tested, but no Google Cloud service
-  account has been created yet to prove an actual upload
+- ✅ **Email delivery moved from Gmail SMTP to the SendGrid API and verified
+  with a real send** — SMTP is fully gone (its port 587 is unreachable from
+  a Claude Code routine's network sandbox, so it could never have worked
+  there); SendGrid delivered a real generated PDF + .docx successfully
+- ⚠️ **Drive upload exists in code but is intentionally not connected** —
+  no Google Cloud service account has been set up, so it's a deliberate
+  no-op for now (every skip path is tested); wire up
+  `GOOGLE_SERVICE_ACCOUNT_JSON` when Drive delivery is actually wanted
 - ⚠️ **Production has never been exercised**
-- ⚠️ `CURRENT` is the only `malcolm_listing_state` value observed — filtering
-  against other states is unproven
-- ⚠️ `offices.json` now has 13 offices with confirmed IDs; only the first
-  (Sydney Sooth) has a `prepared_for` recipient name and custom
-  `helpful_tip` set — the rest fall back to an empty "prepared for" line
-  and the default compliance tip until those are provided per office
+- ✅ `malcolm_listing_state_option_os_malcolm_listing_state`'s full set of
+  values is confirmed: `Pending`, `Available`, `Current` — only `Current`
+  (via `current_status_value` in config.json) counts toward "Total Current
+  Status Listings"; the other two are valid states, just not "current" ones
+- `offices.json` has the 12 real offices provided, each with confirmed IDs;
+  none has a `prepared_for` recipient name or custom `helpful_tip` set yet
+  — every office falls back to an empty "prepared for" line and the default
+  compliance tip until those are provided per office

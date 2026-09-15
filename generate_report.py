@@ -79,7 +79,7 @@ USAGE
     python3 generate_report.py --mock
 
   Single-office test (e.g. the Bresic reconciliation pass):
-    python3 generate_report.py --mock --only-office 1
+    python3 generate_report.py --mock --only-office 5
 """
 
 import argparse

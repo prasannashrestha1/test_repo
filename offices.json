@@ -1,12 +1,5 @@
 [
   {
-    "office_id": "1",
-    "office_name": "Sydney Sooth",
-    "malcolm_id": "1",
-    "prepared_for": "Will Gosse",
-    "helpful_tip": "Buyer's Agents must complete AML checks before a brief can enter the exchange."
-  },
-  {
     "office_id": "3",
     "office_name": "Sydney Sotheby's International Realty",
     "malcolm_id": "3"
