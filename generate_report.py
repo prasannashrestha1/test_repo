@@ -398,29 +398,71 @@ def compute_top_suburbs(matches_current, top_n=5):
     return counts.most_common(top_n)
 
 
-def compute_budget_range(matches_current, bucket_width=200_000):
-    points = []
-    for m in matches_current:
-        pmin = m.get("price_min")
-        pmax = m.get("price_max")
-        if pmin is not None and pmax is not None:
-            points.append((pmin + pmax) / 2)
-        elif m.get("listing_price") is not None:
-            points.append(m["listing_price"])
+def compute_budget_range(matches_current):
+    """Return (label, share_pct) for the price band the most buyer briefs are
+    actively looking in, by interval overlap across their budget ranges.
 
-    if not points:
+    Every brief carries a real range (brief_min/max_price_number), so the
+    band is found by sweeping the distinct range endpoints, counting how
+    many briefs' ranges cover each elementary segment between consecutive
+    endpoints, and reporting the widest contiguous run of segments at peak
+    coverage. share_pct is then a genuine demand figure: the proportion of
+    briefs that would actually transact anywhere in that band.
+
+    This replaces an approach that collapsed each brief to the MIDPOINT of
+    its range and dropped that into a fixed $200k grid anchored at $0, then
+    printed the grid cell's own boundaries as the answer. That reported a
+    band nobody had asked for: on real data it returned "$2.6M-$2.8M" to
+    describe four briefs of $2.55-2.9M, $2.6-2.9M, $2.6-2.85M and
+    $2.7-2.85M — not one had a $2.8M ceiling, and one started below the
+    $2.6M floor. The true peak band there is $2.7M-$2.9M.
+
+    Because every endpoint is an edge in the sweep, an interval either
+    covers a whole elementary segment or misses its interior entirely, so
+    "covers" and "overlaps" coincide and probing each segment's midpoint is
+    exact, not an approximation.
+    """
+    intervals = []
+    for m in matches_current:
+        lo, hi = m.get("price_min"), m.get("price_max")
+        if lo is not None and hi is not None:
+            intervals.append((min(lo, hi), max(lo, hi)))
+        elif m.get("listing_price") is not None:
+            # No brief range on this match — just a single listing price.
+            # It stays in the denominator (it's still a match) but a
+            # zero-width point can't cover a band, so it never wins one.
+            p = m["listing_price"]
+            intervals.append((p, p))
+
+    if not intervals:
         return "N/A", 0.0
 
-    buckets = Counter(int(p // bucket_width) for p in points)
-    top_bucket, top_count = buckets.most_common(1)[0]
-    low = top_bucket * bucket_width
-    high = low + bucket_width
-    share_pct = top_count / len(points) * 100
+    edges = sorted({v for iv in intervals for v in iv})
+    if len(edges) < 2:
+        return f"${edges[0]:,.0f} - ${edges[0]:,.0f}", 100.0
 
-    def fmt(v):
-        return f"${v/1_000_000:.1f}M" if v >= 1_000_000 else f"${v:,.0f}"
+    segments = []
+    for i in range(len(edges) - 1):
+        lo, hi = edges[i], edges[i + 1]
+        probe = (lo + hi) / 2
+        segments.append((lo, hi, sum(1 for a, b in intervals if a <= probe <= b)))
 
-    return f"{fmt(low)}-{fmt(high)}", share_pct
+    peak = max(cov for _, _, cov in segments)
+    if peak == 0:  # only zero-width points, no real range to report
+        return "N/A", 0.0
+
+    # Merge contiguous segments sitting at peak coverage, keeping the widest
+    # such run — a peak plateau spanning two segments is one band, not two.
+    best = run_lo = run_hi = None
+    for lo, hi, cov in segments:
+        if cov != peak:
+            run_lo = run_hi = None
+            continue
+        run_lo, run_hi = (lo if run_lo is None else run_lo), hi
+        if best is None or (run_hi - run_lo) > (best[1] - best[0]):
+            best = (run_lo, run_hi)
+
+    return f"${best[0]:,.0f} - ${best[1]:,.0f}", peak / len(intervals) * 100
 
 
 def compute_dwelling_type_display(matches_current):
