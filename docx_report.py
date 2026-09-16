@@ -36,7 +36,7 @@ import os
 from xml.sax.saxutils import escape as _xml_escape
 
 from docx import Document
-from docx.enum.table import WD_ALIGN_VERTICAL, WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_ROW_HEIGHT_RULE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -49,26 +49,80 @@ BLACK = RGBColor(0x00, 0x00, 0x00)
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
 
 
+# ECMA-376 declares <w:tblPr>, <w:tcPr> and <w:tcMar> as xsd:SEQUENCE types,
+# not free-form property bags: their children are only valid in this exact
+# order. Every helper below used to build these with a plain .append(), which
+# produced an out-of-order (schema-invalid) document. Word itself is lenient
+# and renders out-of-order properties anyway — which is exactly why this
+# survived so many rounds of Word-based verification — but Google Docs' docx
+# importer is strict and silently DISCARDS any property it finds out of
+# sequence. That is the root cause of the long-standing alignment complaints,
+# and all three dropped properties are ones that were reported as broken:
+#   * w:tblInd was appended last (after w:tblLook), so the explicit "pin this
+#     table's left edge to the margin" was thrown away and panels drifted;
+#   * w:tcMar was appended after w:vAlign on the section-label cell, so its
+#     padding-top was thrown away and "EXECUTIVE SNAPSHOT" stopped lining up
+#     with the table header beside it;
+#   * w:tcMar's own left/right were emitted after bottom, so the horizontal
+#     padding of EVERY padded cell was thrown away — including the Key
+#     Insights panel's deliberately asymmetric 7mm/4mm edges, which is why
+#     its left and right padding did not match.
+# tools/check_docx_layout.py re-reads the generated file and fails on any
+# out-of-sequence property, so a future .append() cannot quietly bring this
+# back — run it against a generated report after touching this module.
+_TBLPR_ORDER = (
+    "tblStyle", "tblpPr", "tblOverlap", "bidiVisual", "tblStyleRowBandSize",
+    "tblStyleColBandSize", "tblW", "jc", "tblCellSpacing", "tblInd",
+    "tblBorders", "shd", "tblLayout", "tblCellMar", "tblLook", "tblCaption",
+    "tblDescription",
+)
+_TCPR_ORDER = (
+    "cnfStyle", "tcW", "gridSpan", "hMerge", "vMerge", "tcBorders", "shd",
+    "noWrap", "tcMar", "textDirection", "tcFitText", "vAlign", "hideMark",
+)
+_MAR_ORDER = ("top", "left", "bottom", "right")
+
+
+def _ordered_child(parent, tag_name, order, clear=False):
+    """Fetch-or-create parent's <w:{tag_name}> child, inserted at the position
+    the OOXML schema's sequence demands rather than simply appended at the
+    end. Pass clear=True to reuse an existing element but drop its children
+    (for the border/margin containers, which are rebuilt wholesale)."""
+    el = parent.find(qn(f"w:{tag_name}"))
+    if el is not None:
+        if clear:
+            for child in list(el):
+                el.remove(child)
+        return el
+    el = OxmlElement(f"w:{tag_name}")
+    rank = order.index(tag_name)
+    for sibling in parent:
+        name = etree.QName(sibling).localname
+        if name not in order or order.index(name) > rank:
+            sibling.addprevious(el)
+            return el
+    parent.append(el)
+    return el
+
+
 def _shade_cell(cell, hex_color: str):
     """Set a table cell's background fill. python-docx has no high-level API
     for this — it means dropping to the underlying XML directly."""
-    shd = OxmlElement("w:shd")
+    shd = _ordered_child(cell._tc.get_or_add_tcPr(), "shd", _TCPR_ORDER)
     shd.set(qn("w:val"), "clear")
     shd.set(qn("w:color"), "auto")
     shd.set(qn("w:fill"), hex_color)
-    cell._tc.get_or_add_tcPr().append(shd)
 
 
 def _no_borders(table):
     tbl_pr = table._tbl.tblPr
-    borders = OxmlElement("w:tblBorders")
+    borders = _ordered_child(tbl_pr, "tblBorders", _TBLPR_ORDER, clear=True)
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
         el = OxmlElement(f"w:{edge}")
         el.set(qn("w:val"), "none")
         el.set(qn("w:sz"), "0")
         el.set(qn("w:space"), "0")
         borders.append(el)
-    tbl_pr.append(borders)
 
 
 def _set_full_borders(table, color_hex: str, sz: int):
@@ -80,14 +134,13 @@ def _set_full_borders(table, color_hex: str, sz: int):
     why the Matched Listings table was rendering visibly thinner than the
     reference design's bolder grid."""
     tbl_pr = table._tbl.tblPr
-    borders = OxmlElement("w:tblBorders")
+    borders = _ordered_child(tbl_pr, "tblBorders", _TBLPR_ORDER, clear=True)
     for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
         el = OxmlElement(f"w:{edge}")
         el.set(qn("w:val"), "single")
         el.set(qn("w:sz"), str(sz))
         el.set(qn("w:color"), color_hex)
         borders.append(el)
-    tbl_pr.append(borders)
 
 
 def _clear_empty_leading_paragraph(cell):
@@ -124,15 +177,114 @@ def _set_cell_margins(cell, top_mm=None, bottom_mm=None, left_mm=None, right_mm=
     CSS padding on table.plain/table.listings cells and the panel elements.
     python-docx has no high-level API for this either — table cells default
     to Word's own built-in margins, which don't match the CSS values at all."""
-    mar = OxmlElement("w:tcMar")
-    for tag, val_mm in (("top", top_mm), ("bottom", bottom_mm), ("left", left_mm), ("right", right_mm)):
+    mar = _ordered_child(cell._tc.get_or_add_tcPr(), "tcMar", _TCPR_ORDER, clear=True)
+    # Iterated in _MAR_ORDER (top, left, bottom, right), NOT in the
+    # top/bottom/left/right order that reads more naturally: w:tcMar is itself
+    # a sequence, and emitting left/right after bottom is what caused every
+    # padded cell's horizontal padding to be discarded on import.
+    by_tag = {"top": top_mm, "left": left_mm, "bottom": bottom_mm, "right": right_mm}
+    for tag in _MAR_ORDER:
+        val_mm = by_tag[tag]
         if val_mm is None:
             continue
         el = OxmlElement(f"w:{tag}")
         el.set(qn("w:w"), str(int(Mm(val_mm).twips)))
         el.set(qn("w:type"), "dxa")
         mar.append(el)
-    cell._tc.get_or_add_tcPr().append(mar)
+
+
+def _set_table_cell_margins(table, top_mm=0, bottom_mm=0, left_mm=0, right_mm=0):
+    """Sets the table-wide DEFAULT cell padding (OOXML tblCellMar), which every
+    cell inherits unless it sets its own tcMar.
+
+    This exists because Word's built-in default is 108 twips (1.9mm) of left
+    AND right padding on every cell, and that default silently shrank each
+    layout cell's usable content area by 3.8mm. The nested tables placed
+    inside those cells were sized to the cell's FULL width, so they were
+    3.8mm too wide for the space they actually had — and Performance
+    Overview, nested two levels deep, overflowed by 7.6mm. The layout
+    wrappers here correspond to HTML elements (.header, .labeled-row,
+    .two-col) that have no horizontal padding at all, so zeroing this both
+    fixes the overflow and makes their text sit flush with the page margin,
+    in line with the commentary paragraphs below them."""
+    mar = _ordered_child(table._tbl.tblPr, "tblCellMar", _TBLPR_ORDER, clear=True)
+    by_tag = {"top": top_mm, "left": left_mm, "bottom": bottom_mm, "right": right_mm}
+    for tag in _MAR_ORDER:
+        el = OxmlElement(f"w:{tag}")
+        el.set(qn("w:w"), str(int(Mm(by_tag[tag]).twips)))
+        el.set(qn("w:type"), "dxa")
+        mar.append(el)
+
+
+def _first_col_left_padding(table):
+    """The left cell padding actually in force for a table's first column:
+    the cell's own tcMar if it sets one, else the table's tblCellMar, else
+    Word's built-in 108-twip default."""
+    if not table.rows:
+        return 0
+    cell = table.cell(0, 0)
+    for el in (cell._tc.find(f"{qn('w:tcPr')}/{qn('w:tcMar')}"),
+               table._tbl.find(f"{qn('w:tblPr')}/{qn('w:tblCellMar')}")):
+        if el is None:
+            continue
+        left = el.find(qn("w:left"))
+        if left is None:
+            left = el.find(qn("w:start"))
+        if left is not None:
+            return int(left.get(qn("w:w")))
+    return 108
+
+
+def _pin_left_edge_to_margin(table):
+    """Sets w:tblInd so a TOP-LEVEL table's visible box lands exactly on the
+    page margin, with both edges flush.
+
+    Word does not place a table's border box at `margin + tblInd`. It places
+    it at `margin + tblInd - <first column's left padding>`, so that the first
+    cell's TEXT lands on the indent — the same reason an ordinary Word table's
+    borders hang slightly into the left margin while its text lines up with
+    body text. Google Docs' importer matches Word here.
+
+    With tblInd left at 0, that meant any full-width table whose first column
+    has padding was translated bodily to the left: the Key Insights panel by
+    its own 7mm, the Matched Listings table by its 4mm. Measured off a real
+    Word-exported PDF, the panel was painted from -6.98mm to +171.03mm — the
+    correct WIDTH, in the wrong PLACE, hanging into the left margin and
+    stopping short of the right. That is the "left and right padding are
+    different" report, and it is also why dragging the table in Word or Docs
+    could never fix it: the box is the full text width, so sliding it right
+    to close the left gap only opened an equal one past the right margin.
+
+    Compensating here puts both edges on the margin and leaves the padding
+    where the CSS wants it, inside the panel.
+
+    Top-level tables only. Measured against the same export, a table nested
+    inside a cell is NOT given this compensation by Word — the Executive
+    Snapshot and Performance Overview tables both render with their box
+    exactly on their content column's origin — so calling this on a nested
+    table would push it off by its own padding instead of fixing anything.
+    """
+    tbl_ind = _ordered_child(table._tbl.tblPr, "tblInd", _TBLPR_ORDER)
+    tbl_ind.set(qn("w:type"), "dxa")
+    tbl_ind.set(qn("w:w"), str(_first_col_left_padding(table)))
+
+
+def _layout_wrapper(table):
+    """Prepares a table used purely for LAYOUT (an invisible container that
+    reproduces a CSS flex row: .header, .labeled-row, .two-col, the insights
+    panel, the footer). Such a table is invisible and, in the HTML it mirrors,
+    contributes no horizontal padding of its own — so it gets no borders AND
+    no default cell padding.
+
+    Zeroing the padding is the part that actually matters. Word's built-in
+    default of 108 twips per side meant each of these containers quietly ate
+    3.8mm of its own content width, while the nested table inside was still
+    sized to the container's full declared width — so it overflowed. The
+    Performance Overview table sits two containers deep and was running
+    7.6mm past the right edge, which is why its right-hand edge never lined
+    up with the Key Insights panel or the Matched Listings table below."""
+    _no_borders(table)
+    _set_table_cell_margins(table, top_mm=0, bottom_mm=0, left_mm=0, right_mm=0)
 
 
 def _para(doc_or_cell, text="", size=10, bold=False, italic=False, color=BLACK,
@@ -180,7 +332,43 @@ def _spacer(doc, pt=3):
     return p
 
 
-def _set_col_widths(table, widths_cm):
+def _distribute_twips(widths_cm, total_twips=None):
+    """Converts column widths in cm to whole twips such that they sum to
+    EXACTLY the twip width of their own total, using largest-remainder
+    apportionment.
+
+    Rounding each column independently does not do this. Cm(8.9).twips is
+    5046, so a two-column 8.9+8.9 table declares 10092 twips while the page's
+    text width (Cm(17.8)) is 10091 — the table is one twip wider than the
+    space it has. Same for the Key Insights panel (10092), the Executive
+    Snapshot table (one twip wider than its 14.2cm column) and the
+    Performance Overview table (one twip wider than its 9.4cm column).
+
+    A twip is 1/1440 inch and invisible on its own. It matters because an
+    overfull table is not a layout a renderer can honour as written: it has
+    to absorb that overflow on one side or the other, and which side it
+    picks is not something the file specifies. That is the mechanism behind
+    "when I drag the table the left and right don't match" — the table was
+    genuinely, if imperceptibly, too wide, so it could not sit symmetrically.
+    Apportioning from the total means every full-width table in the document
+    now lands on the same 10091 twips and shares both edges exactly."""
+    exact = [w * 360000 / 635 for w in widths_cm]  # 360000 EMU/cm, 635 EMU/twip
+    total = total_twips if total_twips is not None else int(round(sum(widths_cm) * 360000 / 635))
+    # the cm figures are proportions of the target, not absolutes: scale them
+    # onto it so a caller-supplied total is met exactly
+    scale = total / sum(exact)
+    exact = [e * scale for e in exact]
+    floors = [int(f) for f in exact]
+    shortfall = total - sum(floors)
+    assert 0 <= shortfall <= len(floors), (widths_cm, total, floors)
+    # hand the leftover twips to the columns with the largest dropped fraction
+    for idx in sorted(range(len(exact)), key=lambda i: exact[i] - floors[i],
+                      reverse=True)[:shortfall]:
+        floors[idx] += 1
+    return floors
+
+
+def _set_col_widths(table, widths_cm, total_twips=None):
     """Sets explicit column widths AND forces fixed table layout.
 
     Word's default table layout ("autofit to contents") recalculates column
@@ -213,25 +401,18 @@ def _set_col_widths(table, widths_cm):
     is exactly the kind of interaction that can expose which side it
     resolves it on.
     """
-    col_twips = [int(Cm(w).twips) for w in widths_cm]
+    col_twips = _distribute_twips(widths_cm, total_twips)
     tbl = table._tbl
     tbl_pr = tbl.tblPr
-    if tbl_pr.find(qn("w:tblLayout")) is None:
-        layout = OxmlElement("w:tblLayout")
-        layout.set(qn("w:type"), "fixed")
-        tbl_pr.append(layout)
 
-    tbl_w = tbl_pr.find(qn("w:tblW"))
-    if tbl_w is None:
-        tbl_w = OxmlElement("w:tblW")
-        tbl_pr.append(tbl_w)
+    layout = _ordered_child(tbl_pr, "tblLayout", _TBLPR_ORDER)
+    layout.set(qn("w:type"), "fixed")
+
+    tbl_w = _ordered_child(tbl_pr, "tblW", _TBLPR_ORDER)
     tbl_w.set(qn("w:type"), "dxa")
     tbl_w.set(qn("w:w"), str(sum(col_twips)))
 
-    tbl_ind = tbl_pr.find(qn("w:tblInd"))
-    if tbl_ind is None:
-        tbl_ind = OxmlElement("w:tblInd")
-        tbl_pr.append(tbl_ind)
+    tbl_ind = _ordered_child(tbl_pr, "tblInd", _TBLPR_ORDER)
     tbl_ind.set(qn("w:type"), "dxa")
     tbl_ind.set(qn("w:w"), "0")
 
@@ -246,12 +427,10 @@ def _set_col_widths(table, widths_cm):
     # instead of three separate roundings that could each land a twip apart.
     for row in table.rows:
         for cell, w_twips in zip(row.cells, col_twips):
-            tcW = cell._tc.get_or_add_tcPr().find(qn("w:tcW"))
-            if tcW is None:
-                tcW = OxmlElement("w:tcW")
-                cell._tc.get_or_add_tcPr().append(tcW)
+            tcW = _ordered_child(cell._tc.get_or_add_tcPr(), "tcW", _TCPR_ORDER)
             tcW.set(qn("w:type"), "dxa")
             tcW.set(qn("w:w"), str(w_twips))
+    return col_twips
 
 
 def _set_page_background(doc, hex_color: str):
@@ -272,13 +451,12 @@ def _set_cell_bottom_border(cell, color_hex: str, sz: int):
     """Sets only a bottom border on a cell — matches table.plain's CSS
     (border-bottom on header/body cells only, no vertical/top/left/right
     lines) rather than a full box grid like table.listings genuinely has."""
-    borders = OxmlElement("w:tcBorders")
+    borders = _ordered_child(cell._tc.get_or_add_tcPr(), "tcBorders", _TCPR_ORDER, clear=True)
     bottom = OxmlElement("w:bottom")
     bottom.set(qn("w:val"), "single")
     bottom.set(qn("w:sz"), str(sz))
     bottom.set(qn("w:color"), color_hex)
     borders.append(bottom)
-    cell._tc.get_or_add_tcPr().append(borders)
 
 
 def _add_circle_shape(paragraph, diameter_mm, fill_hex, title, body_text,
@@ -349,7 +527,7 @@ def _add_circle_shape(paragraph, diameter_mm, fill_hex, title, body_text,
     paragraph._p.append(r_element)
 
 
-def _labeled_row(doc, label_text: str):
+def _labeled_row(doc, label_text: str, total_twips: int):
     """Matches template.html's .labeled-row: a narrow label column (.row-label,
     30mm/~3cm in the CSS) beside a wider content column (.row-content), with
     a 6mm gap between them (CSS `gap: 6mm` on the flex row) — a sidebar
@@ -358,8 +536,8 @@ def _labeled_row(doc, label_text: str):
     other with nothing between them. Returns the content cell (now the third
     column) for the caller to build into."""
     wrap = doc.add_table(rows=1, cols=3)
-    _no_borders(wrap)
-    _set_col_widths(wrap, [3.0, 0.6, 14.2])
+    _layout_wrapper(wrap)
+    col_twips = _set_col_widths(wrap, [3.0, 0.6, 14.2], total_twips=total_twips)
     label_cell, content_cell = wrap.cell(0, 0), wrap.cell(0, 2)
     # .row-label { padding-top: 1.5mm } -- nudges the label down to align
     # with the table header baseline instead of its own top edge. This only
@@ -373,7 +551,7 @@ def _labeled_row(doc, label_text: str):
     content_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
     _set_cell_margins(label_cell, top_mm=1.5)
     _para(label_cell, label_text, size=9, bold=True, color=TEAL, upper=True)
-    return content_cell
+    return content_cell, col_twips[2]
 
 
 def render_docx(context: dict, output_path: str):
@@ -406,11 +584,21 @@ def render_docx(context: dict, output_path: str):
     section.bottom_margin = Cm(1.6)
     section.left_margin = Cm(1.6)
     section.right_margin = Cm(1.6)
+    # The one number every full-width table is measured against. Derived from
+    # the section rather than hardcoded as Cm(17.8): the page is 21cm with
+    # 1.6cm margins, but those round to 11906 - 907 - 907 = 10092 twips,
+    # whereas Cm(17.8) rounds independently to 10091. Every full-width table
+    # was therefore built one twip narrower than the space it actually had,
+    # leaving a sliver of unequal margin on the right of the page that no
+    # amount of adjusting the cm figures could remove.
+    CONTENT_TWIPS = (section.page_width.twips
+                     - section.left_margin.twips
+                     - section.right_margin.twips)
 
     # -- running footer, appears on every page, matching template.html's .footer --
     footer_table = section.footer.add_table(rows=1, cols=2, width=Cm(17.8))
-    _no_borders(footer_table)
-    _set_col_widths(footer_table, [12.0, 5.8])
+    _layout_wrapper(footer_table)
+    _set_col_widths(footer_table, [12.0, 5.8], total_twips=CONTENT_TWIPS)
     _para(footer_table.cell(0, 0), context["footer_contact"], size=7.5)
     _para(footer_table.cell(0, 1), context["logo_text"], size=10, bold=True,
           align=WD_ALIGN_PARAGRAPH.RIGHT)
@@ -420,8 +608,8 @@ def render_docx(context: dict, output_path: str):
     # .header { gap: 6mm } -- a middle spacer column, same approach as
     # _labeled_row, since a table's columns otherwise sit flush together.
     header_table = doc.add_table(rows=1, cols=3)
-    _no_borders(header_table)
-    _set_col_widths(header_table, [10.4, 0.6, 6.8])
+    _layout_wrapper(header_table)
+    _set_col_widths(header_table, [10.4, 0.6, 6.8], total_twips=CONTENT_TWIPS)
     left = header_table.cell(0, 0)
     # The document-wide 1.4 line-spacing (matching template.html's line-height:
     # 1.4 on body text) compounds very differently on a single 24pt line than
@@ -446,9 +634,14 @@ def render_docx(context: dict, output_path: str):
 
     # .header { margin-bottom: 5mm }
     _spacer(doc, pt=Mm(5).pt)
-    exec_content = _labeled_row(doc, "Executive Snapshot")
+    exec_content, exec_twips = _labeled_row(doc, "Executive Snapshot", CONTENT_TWIPS)
     exec_table = exec_content.add_table(rows=1, cols=3)
-    exec_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    # No table-level w:jc here. This table previously carried
+    # WD_TABLE_ALIGNMENT.CENTER while the Performance Overview table beside
+    # it did not, so the two were positioned by different rules and could
+    # never line up with each other. Both now simply fill their content
+    # column, left edge flush, exactly like .row-content's width:100% tables
+    # in the CSS.
     hdr = exec_table.rows[0].cells
     for i, label in enumerate(("Metric", "Result", "Change vs. Previous Period")):
         _para(hdr[i], label, size=7, bold=True, upper=True,
@@ -469,18 +662,20 @@ def render_docx(context: dict, output_path: str):
     # one line at a readable size) and Result very little is both a closer
     # match to how much room each column's actual content needs, and what
     # was asked for directly: a narrower Result column.
-    _set_col_widths(exec_table, [6.5, 3.0, 4.7])
+    # table.plain td { padding: 1.6mm 3mm }
+    _set_table_cell_margins(exec_table, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
+    _set_col_widths(exec_table, [6.5, 3.0, 4.7], total_twips=exec_twips)
     _clear_empty_leading_paragraph(exec_content)
 
     # table.plain's own margin-bottom (4mm, inside row-content) plus
     # .labeled-row's margin-bottom (4mm, after the whole row) stack to 8mm
     # of real gap in the HTML before the next labeled row begins.
     _spacer(doc, pt=Mm(8).pt)
-    perf_content = _labeled_row(doc, "Performance Overview")
+    perf_content, perf_twips = _labeled_row(doc, "Performance Overview", CONTENT_TWIPS)
     # .two-col { gap: 6mm } -- middle spacer column, same approach as above.
     perf_wrap = perf_content.add_table(rows=1, cols=3)
-    _no_borders(perf_wrap)
-    _set_col_widths(perf_wrap, [9.4, 0.6, 4.2])
+    _layout_wrapper(perf_wrap)
+    perf_cols = _set_col_widths(perf_wrap, [9.4, 0.6, 4.2], total_twips=perf_twips)
     perf_cell, tip_cell = perf_wrap.cell(0, 0), perf_wrap.cell(0, 2)
 
     perf_table = perf_cell.add_table(rows=1, cols=3)
@@ -500,7 +695,8 @@ def render_docx(context: dict, output_path: str):
             _set_cell_margins(cell, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
     # Same reasoning as the Executive Snapshot table: Listings/Matches only
     # ever hold a short number, so Property Type gets most of the width.
-    _set_col_widths(perf_table, [4.7, 2.0, 2.7])
+    _set_table_cell_margins(perf_table, top_mm=1.6, bottom_mm=1.6, left_mm=3, right_mm=3)
+    _set_col_widths(perf_table, [4.7, 2.0, 2.7], total_twips=perf_cols[0])
     _clear_empty_leading_paragraph(perf_cell)
 
     tip_cell.vertical_alignment = 1  # center
@@ -533,14 +729,14 @@ def render_docx(context: dict, output_path: str):
     # 8mm, same reasoning as the Executive Snapshot gap above.
     _spacer(doc, pt=Mm(8).pt)
     insights = doc.add_table(rows=1, cols=3)
-    _no_borders(insights)
+    _layout_wrapper(insights)
     # Full container width -- spans the same total width as the row-label +
     # content area above it (17.8cm), same as the header/tables. The actual
     # bug reported earlier wasn't the width, it was that this table rendered
     # with an unwanted left offset in Google Docs despite that; the
     # explicit width + zeroed indent in _set_col_widths is what actually
     # fixes that positioning, independent of how wide the table itself is.
-    _set_col_widths(insights, [5.93, 5.93, 5.94])
+    _set_col_widths(insights, [5.93, 5.93, 5.94], total_twips=CONTENT_TWIPS)
     for c in range(3):
         _shade_cell(insights.cell(0, c), "105652")
     col1, col2, col3 = insights.cell(0, 0), insights.cell(0, 1), insights.cell(0, 2)
@@ -550,6 +746,9 @@ def render_docx(context: dict, output_path: str):
     _set_cell_margins(col1, top_mm=4, bottom_mm=4, left_mm=7, right_mm=4)
     _set_cell_margins(col2, top_mm=4, bottom_mm=4, left_mm=4, right_mm=4)
     _set_cell_margins(col3, top_mm=4, bottom_mm=4, left_mm=4, right_mm=7)
+    # col1 carries the panel's 7mm outer padding, so the box needs that much
+    # indent to sit on the margin rather than 7mm to the left of it.
+    _pin_left_edge_to_margin(insights)
 
     # .insights-title { text-align: center; margin-bottom: 2.5mm } -- applies
     # to all three columns' titles, including col1's real "Key Insights" (not
@@ -664,7 +863,9 @@ def render_docx(context: dict, output_path: str):
         # Word's built-in "Table Grid" style, whose own default weight was
         # rendering visibly thinner than intended.
         _set_full_borders(listing_table, "000000", 20)
-        _set_col_widths(listing_table, [8.9, 8.9])
+        # table.listings td { padding: 3mm 4mm }
+        _set_table_cell_margins(listing_table, top_mm=3, bottom_mm=3, left_mm=4, right_mm=4)
+        _set_col_widths(listing_table, [8.9, 8.9], total_twips=CONTENT_TWIPS)
         for i in range(rows):
             left_val = page["left"][i] if i < len(page["left"]) else ""
             right_val = page["right"][i] if i < len(page["right"]) else ""
@@ -672,6 +873,7 @@ def render_docx(context: dict, output_path: str):
                 cell = listing_table.cell(i, c)
                 _para(cell, val, size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
                 _set_cell_margins(cell, top_mm=3, bottom_mm=3, left_mm=4, right_mm=4)
+        _pin_left_edge_to_margin(listing_table)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     doc.save(output_path)
